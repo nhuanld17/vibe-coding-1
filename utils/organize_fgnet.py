@@ -5,7 +5,6 @@ import shutil
 from pathlib import Path
 from collections import defaultdict
 import re
-import random
 
 class FGNETOrganizer:
     """Tự động phân loại FG-NET dataset"""
@@ -37,7 +36,7 @@ class FGNETOrganizer:
         match = re.match(r'(\d{3})([AB])(\d{2})', name)
         
         if not match:
-            print(f"WARNING: Cannot parse: {filename}")
+            print(f"⚠️ Cannot parse: {filename}")
             return None
         
         person_id, version, age = match.groups()
@@ -64,7 +63,7 @@ class FGNETOrganizer:
         │   └── ...
         └── ...
         """
-        print("Organizing FG-NET by person ID...")
+        print("🗂️ Organizing FG-NET by person ID...")
         
         # Get all image files
         image_files = list(self.source_dir.glob("*.JPG")) + \
@@ -87,10 +86,6 @@ class FGNETOrganizer:
                 'version': parsed['version']
             })
         
-        if len(persons) == 0:
-            print("No images parsed successfully!")
-            return {}
-        
         # Create organized structure
         for person_id, images in persons.items():
             person_dir = self.output_dir / f"person_{person_id}"
@@ -106,11 +101,11 @@ class FGNETOrganizer:
                 
                 shutil.copy2(img_info['path'], dest_path)
             
-            print(f"OK Person {person_id}: {len(images)} images "
+            print(f"✅ Person {person_id}: {len(images)} images "
                   f"(ages: {[img['age'] for img in images]})")
         
-        print(f"\nOrganized {len(persons)} persons!")
-        print(f"Output: {self.output_dir}")
+        print(f"\n🎉 Organized {len(persons)} persons!")
+        print(f"📁 Output: {self.output_dir}")
         
         return persons
     
@@ -122,7 +117,7 @@ class FGNETOrganizer:
         person_001/age_02.jpg,person_001/age_15.jpg,1,13  # same person, gap 13
         person_001/age_07.jpg,person_002/age_07.jpg,0,0   # different, gap 0
         """
-        print(f"\nCreating test pairs (min gap={min_age_gap} years)...")
+        print(f"\n📝 Creating test pairs (min gap={min_age_gap} years)...")
         
         persons = {}
         
@@ -159,6 +154,7 @@ class FGNETOrganizer:
         diff_pairs = []
         person_ids = list(persons.keys())
         
+        import random
         random.seed(42)
         
         while len(diff_pairs) < len(same_pairs):
@@ -187,9 +183,9 @@ class FGNETOrganizer:
             for pair in all_pairs:
                 f.write(f"{pair['img1']},{pair['img2']},{pair['label']},{pair['age_gap']}\n")
         
-        print(f"OK Created {len(same_pairs)} same-person pairs")
-        print(f"OK Created {len(diff_pairs)} different-person pairs")
-        print(f"Saved to: {pairs_file}")
+        print(f"✅ Created {len(same_pairs)} same-person pairs")
+        print(f"✅ Created {len(diff_pairs)} different-person pairs")
+        print(f"📄 Saved to: {pairs_file}")
         
         return pairs_file
     
@@ -219,12 +215,6 @@ class FGNETOrganizer:
                 'age_span': max(ages) - min(ages)
             }
         
-        # Check if no persons found
-        if len(persons) == 0:
-            print("\nNo persons found in organized directory!")
-            print(f"Make sure images are in: {self.source_dir}")
-            return
-        
         # Overall stats
         total_images = sum(p['count'] for p in persons.values())
         total_persons = len(persons)
@@ -240,7 +230,7 @@ class FGNETOrganizer:
         print(f"Average age span: {sum(age_spans)/len(age_spans):.1f} years")
         
         # Show some examples
-        print("\nSample persons:")
+        print("\n📸 Sample persons:")
         for person_id in sorted(persons.keys())[:5]:
             info = persons[person_id]
             print(f"  Person {person_id}: {info['count']} images, "
