@@ -1,0 +1,87 @@
+# Cursor Agent Rules for Missing Person AI Project
+
+agent_behavior:
+  auto_test: true
+  auto_fix: true
+  max_iterations: 10
+  
+workflow:
+  - name: "Create Structure"
+    command: "Create all directories and __init__.py files"
+    verify: "ls -R | grep __init__.py"
+    
+  - name: "Install Dependencies"
+    command: "pip install -r requirements.txt"
+    verify: "pip list | grep fastapi"
+    
+  - name: "Implement Face Detection"
+    files: ["models/face_detection.py"]
+    test_command: "pytest tests/test_face_detection.py -v"
+    success_criteria: "All tests passed"
+    auto_fix: true
+    
+  - name: "Implement Face Embedding"
+    files: ["models/face_embedding.py"]
+    test_command: "pytest tests/test_face_embedding.py -v"
+    success_criteria: "All tests passed"
+    auto_fix: true
+    
+  - name: "Implement Vector DB"
+    files: ["services/vector_db.py"]
+    test_command: "pytest tests/test_vector_db.py -v"
+    success_criteria: "All tests passed"
+    auto_fix: true
+    
+  - name: "Implement Bilateral Search"
+    files: ["services/bilateral_search.py"]
+    test_command: "pytest tests/test_bilateral_search.py -v"
+    success_criteria: "All tests passed"
+    auto_fix: true
+    
+  - name: "Implement Confidence Scoring"
+    files: ["services/confidence_scoring.py"]
+    test_command: "pytest tests/test_confidence_scoring.py -v"
+    success_criteria: "All tests passed"
+    auto_fix: true
+    
+  - name: "Implement API"
+    files: ["api/main.py", "api/routes/upload.py"]
+    test_command: "pytest tests/test_api.py -v"
+    success_criteria: "All tests passed"
+    auto_fix: true
+    
+  - name: "Docker Integration"
+    command: "docker-compose up -d"
+    verify: "docker-compose ps | grep healthy"
+    
+error_handling:
+  on_test_fail:
+    - "Read error message"
+    - "Analyze root cause"
+    - "Fix code"
+    - "Rerun test"
+    - "Repeat until pass or max_iterations"
+    
+  on_import_error:
+    - "Check requirements.txt"
+    - "Install missing package"
+    - "Retry"
+    
+  on_runtime_error:
+    - "Add error handling"
+    - "Add logging"
+    - "Fix logic"
+    - "Retest"
+
+code_quality:
+  require_type_hints: true
+  require_docstrings: true
+  require_tests: true
+  min_coverage: 80
+  
+completion_criteria:
+  - "All tests pass"
+  - "Docker compose starts successfully"
+  - "API responds to /health endpoint"
+  - "Coverage > 80%"
+  - "No linting errors"

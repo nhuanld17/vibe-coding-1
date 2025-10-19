@@ -1,0 +1,128 @@
+version: '3.8'
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.7.4
+    container_name: qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - missing_person_network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER: missing_person_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password_123}
+      POSTGRES_DB: missing_person_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U missing_person_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - missing_person_network
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:-minioadmin123}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - missing_person_network
+
+  api:
+    build: .
+    container_name: missing_person_api
+    ports:
+      - "8000:8000"
+    environment:
+      # Qdrant Configuration
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      
+      # PostgreSQL Configuration
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=missing_person_user
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-secure_password_123}
+      - POSTGRES_DB=missing_person_db
+      
+      # MinIO Configuration
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=${MINIO_PASSWORD:-minioadmin123}
+      
+      # API Configuration
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      
+      # Model Configuration
+      - ARCFACE_MODEL_PATH=/app/models/weights/arcface_r100_v1.onnx
+      - USE_GPU=false
+      
+      # Thresholds
+      - FACE_CONFIDENCE_THRESHOLD=0.70
+      - SIMILARITY_THRESHOLD=0.65
+      - TOP_K_MATCHES=10
+      
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./models/weights:/app/models/weights:ro
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - missing_person_network
+    restart: unless-stopped
+
+volumes:
+  qdrant_storage:
+    driver: local
+  postgres_data:
+    driver: local
+  minio_data:
+    driver: local
+
+networks:
+  missing_person_network:
+    driver: bridge
+    name: missing_person_network
