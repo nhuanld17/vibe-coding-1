@@ -1,167 +1,167 @@
-# 🎯 Missing Person AI - Hệ Thống Tìm Kiếm Người Mất Tích
+# 🎯 Missing Person AI - Facial Recognition System
 
-> **AI-powered facial recognition system for matching missing and found persons**
+> **AI-powered facial recognition system for matching missing and found persons using advanced computer vision**
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.119.0-green.svg)](https://fastapi.tiangolo.com)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://docker.com)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## 📖 **Tổng Quan**
+## 📖 **Overview**
 
-Missing Person AI là hệ thống thông minh sử dụng **AI và facial recognition** để tự động matching giữa người mất tích và người tìm thấy. Hệ thống có độ chính xác cao với **ArcFace model** và **vector database**.
+Missing Person AI is an intelligent system that leverages **AI and facial recognition** to automatically match missing persons with found individuals. The system achieves high accuracy using **ArcFace model** and **vector database** technology.
 
-### ✨ **Tính Năng Chính**
+### ✨ **Key Features**
 
-- 🔍 **Face Recognition**: Nhận diện khuôn mặt với độ chính xác cao (95%+)
-- 🤖 **AI Matching**: Tự động tìm kiếm và so sánh giữa missing/found
-- 📊 **Confidence Scoring**: Đánh giá mức độ tin cậy của match
-- 🌐 **REST API**: API đầy đủ cho integration
-- 🐳 **Docker Ready**: Dễ dàng deploy và scale
-- 💾 **Persistent Storage**: Dữ liệu được lưu trữ an toàn
+- 🔍 **Advanced Face Recognition**: High-accuracy facial recognition (95%+)
+- 🤖 **AI-Powered Matching**: Automatic search and comparison between missing/found persons
+- 📊 **Confidence Scoring**: Intelligent confidence assessment for matches
+- 🌐 **RESTful API**: Complete API for seamless integration
+- 🐳 **Docker Ready**: Easy deployment and scaling
+- 💾 **Persistent Storage**: Secure data persistence with Qdrant vector database
 
 ---
 
-## 🚀 **Quick Start - Chạy Ngay Trong 3 Bước**
+## 🚀 **Quick Start - Get Running in 3 Steps**
 
-### **Bước 1: Clone Project**
+### **Step 1: Clone Repository**
 ```bash
 git clone <your-repo-url>
 cd AI
 ```
 
-### **Bước 2: Download AI Model**
+### **Step 2: Download AI Model**
 ```bash
 python download_model.py
 ```
 
-### **Bước 3: Chạy Docker**
+### **Step 3: Launch with Docker**
 ```bash
 docker-compose up -d
 ```
 
-### **✅ Hoàn Thành!**
+### **✅ You're Ready!**
 - **API**: http://localhost:8000
 - **Swagger UI**: http://localhost:8000/docs
 - **Health Check**: http://localhost:8000/health
 
 ---
 
-## 📋 **Yêu Cầu Hệ Thống**
+## 📋 **System Requirements**
 
 ### **Minimum Requirements**
 - **OS**: Windows 10+, macOS 10.15+, Ubuntu 18.04+
 - **RAM**: 4GB (8GB recommended)
 - **Storage**: 2GB free space
-- **Docker**: 20.10+ với Docker Compose
-- **Python**: 3.11+ (cho download model)
+- **Docker**: 20.10+ with Docker Compose
+- **Python**: 3.11+ (for model download)
 
 ### **Recommended**
 - **RAM**: 8GB+
 - **CPU**: 4+ cores
-- **GPU**: NVIDIA GPU với CUDA (optional, tăng tốc)
+- **GPU**: NVIDIA GPU with CUDA (optional, for acceleration)
 
 ---
 
-## 🛠️ **Cài Đặt Chi Tiết**
+## 🛠️ **Installation**
 
-### **1. Cài Đặt Dependencies**
+### **1. Install Dependencies**
 
 #### **Windows:**
 ```bash
-# Cài Docker Desktop
-# Download từ: https://www.docker.com/products/docker-desktop
+# Install Docker Desktop
+# Download from: https://www.docker.com/products/docker-desktop
 
-# Cài Python 3.11+
-# Download từ: https://www.python.org/downloads/
+# Install Python 3.11+
+# Download from: https://www.python.org/downloads/
 ```
 
 #### **macOS:**
 ```bash
-# Cài Docker Desktop
+# Install Docker Desktop
 brew install --cask docker
 
-# Cài Python
+# Install Python
 brew install python@3.11
 ```
 
 #### **Ubuntu:**
 ```bash
-# Cài Docker
+# Install Docker
 curl -fsSL https://get.docker.com -o get-docker.sh
 sh get-docker.sh
 
-# Cài Python
+# Install Python
 sudo apt update
 sudo apt install python3.11 python3.11-pip
 ```
 
 ### **2. Download AI Model**
 ```bash
-# Chạy script download model (khoảng 250MB)
+# Download AI model (approximately 250MB)
 python download_model.py
 
-# Kiểm tra model đã download
+# Verify model download
 ls -la models/weights/arcface_r100_v1.onnx
-# Phải thấy file ~249MB
+# Should see ~249MB file
 ```
 
-### **3. Khởi Động Hệ Thống**
+### **3. Start the System**
 ```bash
-# Khởi động tất cả services
+# Start all services
 docker-compose up -d
 
-# Kiểm tra status
+# Check status
 docker-compose ps
 
-# Xem logs nếu cần
+# View logs if needed
 docker-compose logs api -f
 ```
 
-### **4. Kiểm Tra Hoạt Động**
+### **4. Verify Installation**
 ```bash
 # Health check
 curl http://localhost:8000/health
 
-# Hoặc mở browser
+# Or open in browser
 open http://localhost:8000/docs
 ```
 
 ---
 
-## 🎯 **Sử Dụng**
+## 🎯 **Usage**
 
-### **📤 Upload Người Mất Tích**
+### **📤 Upload Missing Person**
 
 ```bash
-# Sử dụng Python script (khuyến nghị)
+# Using Python script (recommended)
 python test_upload.py
 
-# Hoặc curl
+# Or using curl
 curl -X POST "http://localhost:8000/api/v1/upload/missing" \
   -F "image=@missing_person.jpg" \
-  -F "metadata={\"case_id\":\"MISS_001\",\"name\":\"Nguyen Van A\",\"age_at_disappearance\":25,\"year_disappeared\":2023,\"gender\":\"male\",\"location_last_seen\":\"Ha Noi\",\"contact\":\"family@example.com\"}"
+  -F "metadata={\"case_id\":\"MISS_年的\",\"name\":\"John Doe\",\"age_at_disappearance\":25,\"year_disappeared\":2023,\"gender\":\"male\",\"location_last_seen\":\"New York\",\"contact\":\"family@example.com\"}"
 ```
 
-### **📤 Upload Người Tìm Thấy**
+### **📤 Upload Found Person**
 
 ```bash
-# Sử dụng Python script
+# Using Python script
 python test_upload_found.py
 
-# Hoặc curl
+# Or using curl
 curl -X POST "http://localhost:8000/api/v1/upload/found" \
   -F "image=@found_person.jpg" \
-  -F "metadata={\"found_id\":\"FOUND_001\",\"current_age_estimate\":30,\"gender\":\"male\",\"current_location\":\"TP HCM\",\"finder_contact\":\"finder@example.com\"}"
+  -F "metadata={\"found_id\":\"FOUND_001\",\"current_age_estimate\":30,\"gender\":\"male\",\"current_location\":\"Los Angeles\",\"finder_contact\":\"finder@example.com\"}"
 ```
 
-### **🔍 Tìm Kiếm**
+### **🔍 Search Operations**
 
 ```bash
-# Tìm kiếm người mất tích
+# Search for missing person
 curl "http://localhost:8000/api/v1/search/missing/MISS_001"
 
-# Tìm kiếm người tìm thấy  
+# Search for found person
 curl "http://localhost:8000/api/v1/search/found/FOUND_001"
 ```
 
@@ -169,16 +169,16 @@ curl "http://localhost:8000/api/v1/search/found/FOUND_001"
 
 ## 📊 **API Endpoints**
 
-| Method | Endpoint | Mô Tả |
-|--------|----------|-------|
-| `POST` | `/api/v1/upload/missing` | Upload người mất tích |
-| `POST` | `/api/v1/upload/found` | Upload người tìm thấy |
-| `GET` | `/api/v1/search/missing/{case_id}` | Tìm kiếm người mất tích |
-| `GET` | `/api/v1/search/found/{found_id}` | Tìm kiếm người tìm thấy |
-| `GET` | `/health` | Health check |
-| `GET` | `/docs` | Swagger UI |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/upload/missing` | Upload missing person data |
+| `POST` | `/api/v1/upload/found` | Upload found person data |
+| `GET` | `/api/v1/search/missing/{case_id}` | Search missing person by ID |
+| `GET` | `/api/v1/search/found/{found_id}` | Search found person by ID |
+| `GET` | `/health` | System health check |
+| `GET` | `/docs` | Interactive API documentation |
 
-> 📚 **Chi tiết API**: Xem [API_DOCUMENTATION.md](API_DOCUMENTATION.md)
+> 📚 **Detailed API Documentation**: See [API_DOCUMENTATION.md](API_DOCUMENTATION.md)
 
 ---
 
@@ -186,21 +186,21 @@ curl "http://localhost:8000/api/v1/search/found/FOUND_001"
 
 ### **Quick Demo**
 ```bash
-# 1. Upload người mất tích
+# 1. Upload missing person
 python test_upload.py
 
-# 2. Upload người tìm thấy (sẽ tự động matching)
+# 2. Upload found person (will automatically match)
 python test_upload_found.py
 
-# 3. Xem kết quả matching trong response
+# 3. View matching results in response
 ```
 
 ### **Swagger UI Demo**
-1. Mở http://localhost:8000/docs
-2. Chọn endpoint `/api/v1/upload/missing`
+1. Open http://localhost:8000/docs
+2. Select `/api/v1/upload/missing` endpoint
 3. Click "Try it out"
-4. Upload ảnh và metadata
-5. Xem kết quả matching
+4. Upload image and metadata
+5. View matching results
 
 ### **Expected Results**
 ```json
@@ -237,12 +237,12 @@ ARCFACE_MODEL_PATH=/app/models/weights/arcface_r100_v1.onnx
 
 ### **Docker Compose Settings**
 ```yaml
-# ports: API port mapping
+# Ports: API port mapping
 ports:
   - "8000:8000"  # API
   - "6333:6333"  # Qdrant (optional)
 
-# volumes: Persistent storage
+# Volumes: Persistent storage
 volumes:
   - qdrant_data:/qdrant/storage  # Database data
 ```
@@ -255,16 +255,16 @@ volumes:
 - **Face Detection**: ~200ms
 - **Embedding Extraction**: ~150ms  
 - **Vector Search**: <100ms
-- **Total Processing**: ~500-800ms/image
+- **Total Processing**: ~500-800ms per image
 
-### **Accuracy**
-- **Face Similarity**: 95%+ cho high-quality images
-- **Age Progression**: 80%+ cho age gap <20 years
-- **Overall Matching**: 85%+ confidence cho strong matches
+### **Accuracy Metrics**
+- **Face Similarity**: 95%+ for high-quality images
+- **Age Progression**: 80%+ for age gap <20 years
+- **Overall Matching**: 85%+ confidence for strong matches
 
 ### **Scalability**
-- **Concurrent Users**: 100+ (với 8GB RAM)
-- **Database Size**: 1M+ face embeddings
+- **Concurrent Users**: 100+ (with 8GB RAM)
+- **Database Capacity**: 1M+ face embeddings
 - **Storage**: ~2KB per face embedding
 
 ---
@@ -273,19 +273,19 @@ volumes:
 
 ### **Common Issues**
 
-#### **1. Model không load được**
+#### **1. Model Loading Failed**
 ```bash
-# Kiểm tra model file
+# Check model file
 ls -la models/weights/arcface_r100_v1.onnx
-# Phải có file ~249MB
+# Should have ~249MB file
 
-# Re-download nếu cần
+# Re-download if needed
 python download_model.py
 ```
 
-#### **2. Docker không start**
+#### **2. Docker Won't Start**
 ```bash
-# Kiểm tra Docker Desktop
+# Check Docker Desktop
 docker --version
 
 # Restart Docker Desktop
@@ -293,37 +293,37 @@ docker --version
 # macOS: brew services restart docker
 ```
 
-#### **3. API không response**
+#### **3. API Not Responding**
 ```bash
-# Kiểm tra containers
+# Check containers
 docker-compose ps
 
-# Xem logs
+# View logs
 docker-compose logs api -f
 
-# Restart nếu cần
+# Restart if needed
 docker-compose restart api
 ```
 
-#### **4. Upload lỗi "Invalid JSON"**
+#### **4. Upload Error "Invalid JSON"**
 ```bash
-# Metadata phải là JSON string (có dấu " bao ngoài)
-# ĐÚNG: "{\"case_id\":\"TEST_001\"}"
-# SAI: {"case_id":"TEST_001"}
+# Metadata must be JSON string (with quotes)
+# CORRECT: "{\"case_id\":\"TEST_001\"}"
+# WRONG: {"case_id":"TEST_001"}
 ```
 
 ### **Debug Commands**
 ```bash
-# Xem tất cả containers
+# View all containers
 docker-compose ps
 
-# Xem logs chi tiết
+# View detailed logs
 docker-compose logs -f
 
-# Restart tất cả
+# Restart all services
 docker-compose restart
 
-# Xóa và rebuild
+# Clean rebuild
 docker-compose down
 docker-compose up -d --build
 ```
@@ -334,13 +334,13 @@ docker-compose up -d --build
 
 ```
 AI/
-├── 📄 README.md                 # File này
-├── 📄 GUIDE.md                  # Hướng dẫn chi tiết
-├── 📄 API_DOCUMENTATION.md      # Tài liệu API
+├── 📄 README.md                 # This file
+├── 📄 GUIDE.md                  # Detailed user guide
+├── 📄 API_DOCUMENTATION.md      # API documentation
 ├── 📄 docker-compose.yml        # Docker configuration
-├── 📄 Dockerfile               # Docker image
+├── 📄 Dockerfile               # Docker image definition
 ├── 📄 requirements.txt         # Python dependencies
-├── 📄 download_model.py        # Download AI model
+├── 📄 download_model.py        # AI model downloader
 ├── 📄 test_upload.py           # Test script
 ├── 📄 test_upload_found.py     # Test script
 ├── 📁 api/                     # FastAPI application
@@ -359,7 +359,7 @@ AI/
 └── 📁 utils/                   # Utilities
     ├── image_processing.py     # Image utilities
     ├── validation.py           # Input validation
-    └── logger.py               # Logging
+    └── logger.py               # Logging system
 ```
 
 ---
@@ -379,18 +379,18 @@ pip install -r requirements.txt
 python -m uvicorn api.main:app --reload
 ```
 
-### **Code Style**
-- **Python**: PEP 8
-- **Type Hints**: Required
-- **Docstrings**: Required for functions
-- **Tests**: pytest
+### **Code Standards**
+- **Python**: PEP 8 compliance
+- **Type Hints**: Required for all functions
+- **Docstrings**: Required for public functions
+- **Testing**: pytest framework
 
 ### **Pull Request Process**
-1. Fork repository
-2. Create feature branch
-3. Make changes
-4. Add tests
-5. Submit PR
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add comprehensive tests
+5. Submit a pull request
 
 ---
 
@@ -413,10 +413,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ### **Documentation**
 - 📖 **User Guide**: [GUIDE.md](GUIDE.md)
-- 📚 **API Docs**: [API_DOCUMENTATION.md](API_DOCUMENTATION.md)
-- 🌐 **Swagger UI**: http://localhost:8000/docs
+- 📚 **API Documentation**: [API_DOCUMENTATION.md](API_DOCUMENTATION.md)
+- 🌐 **Interactive Docs**: http://localhost:8000/docs
 
-### **Issues**
+### **Issues & Support**
 - 🐛 **Bug Reports**: [GitHub Issues](https://github.com/your-repo/issues)
 - 💡 **Feature Requests**: [GitHub Discussions](https://github.com/your-repo/discussions)
 
@@ -430,7 +430,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - [ ] ✅ Docker Desktop installed
 - [ ] ✅ Python 3.11+ installed  
-- [ ] ✅ Project cloned
+- [ ] ✅ Repository cloned
 - [ ] ✅ AI model downloaded (`python download_model.py`)
 - [ ] ✅ Docker services running (`docker-compose up -d`)
 - [ ] ✅ Health check passed (`curl http://localhost:8000/health`)
