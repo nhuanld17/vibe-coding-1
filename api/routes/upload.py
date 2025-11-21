@@ -22,6 +22,7 @@ from ..schemas.models import (
     FaceQualityMetrics, MatchResult, ConfidenceExplanation, ConfidenceFactor
 )
 from utils.validation import validate_file_upload, validate_missing_person_metadata, validate_found_person_metadata
+from utils.identifiers import generate_case_id, generate_found_id
 from utils.image_processing import load_image_from_bytes, normalize_image_orientation, enhance_image_quality
 
 
@@ -179,6 +180,8 @@ async def upload_missing_person(
         # Parse and validate metadata
         try:
             metadata_dict = json.loads(metadata)
+            if not metadata_dict.get("case_id"):
+                metadata_dict["case_id"] = generate_case_id()
             missing_metadata = MissingPersonMetadata(**metadata_dict)
         except json.JSONDecodeError:
             raise HTTPException(
@@ -253,7 +256,8 @@ async def upload_missing_person(
             point_id=point_id,
             potential_matches=potential_matches,
             face_quality=face_quality,
-            processing_time_ms=processing_time
+            processing_time_ms=processing_time,
+            case_id=missing_metadata.case_id
         )
         
     except HTTPException:
@@ -305,6 +309,8 @@ async def upload_found_person(
         # Parse and validate metadata
         try:
             metadata_dict = json.loads(metadata)
+            if not metadata_dict.get("found_id"):
+                metadata_dict["found_id"] = generate_found_id()
             found_metadata = FoundPersonMetadata(**metadata_dict)
         except json.JSONDecodeError:
             raise HTTPException(
@@ -379,7 +385,8 @@ async def upload_found_person(
             point_id=point_id,
             potential_matches=potential_matches,
             face_quality=face_quality,
-            processing_time_ms=processing_time
+            processing_time_ms=processing_time,
+            found_id=found_metadata.found_id
         )
         
     except HTTPException:

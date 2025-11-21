@@ -144,6 +144,8 @@ class UploadResponse(BaseModel):
     potential_matches: List[MatchResult] = Field(default_factory=list, description="Potential matches found")
     face_quality: Optional[FaceQualityMetrics] = Field(None, description="Face quality assessment")
     processing_time_ms: Optional[float] = Field(None, description="Processing time in milliseconds")
+    case_id: Optional[str] = Field(None, description="Auto-generated case identifier (for missing uploads)")
+    found_id: Optional[str] = Field(None, description="Auto-generated found identifier (for found uploads)")
 
 
 class SearchResponse(BaseModel):
