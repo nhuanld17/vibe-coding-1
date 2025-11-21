@@ -368,13 +368,20 @@ async def upload_found_person(
         # Search for potential matches in missing persons
         potential_matches = []
         try:
+            logger.info(f"Searching for missing persons matching found person {found_metadata.found_id}")
+            logger.info(f"Search parameters: age={metadata_dict.get('current_age_estimate')}, gender={metadata_dict.get('gender')}")
             matches = bilateral_search.search_for_missing(
                 embedding, metadata_dict, limit=settings.top_k_matches
             )
+            logger.info(f"Bilateral search returned {len(matches)} raw matches")
             potential_matches = format_match_results(matches, confidence_scoring)
-            logger.info(f"Found {len(potential_matches)} potential matches for found person {found_metadata.found_id}")
+            logger.info(f"Formatted {len(potential_matches)} potential matches for found person {found_metadata.found_id}")
+            if len(potential_matches) > 0:
+                logger.info(f"Top match: face_similarity={potential_matches[0].face_similarity:.3f}, combined_score={potential_matches[0].combined_score:.3f}")
         except Exception as e:
             logger.error(f"Search for matches failed: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             # Don't fail the upload if search fails
         
         processing_time = (time.time() - start_time) * 1000

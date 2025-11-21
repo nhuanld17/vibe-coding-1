@@ -81,9 +81,8 @@ def validate_missing_person_metadata(metadata: Dict[str, Any]) -> Tuple[bool, Li
     """
     errors = []
     
-    # Required fields
+    # Required fields (case_id is auto-generated, so not required)
     required_fields = {
-        'case_id': str,
         'name': str,
         'age_at_disappearance': int,
         'year_disappeared': int,
@@ -103,7 +102,7 @@ def validate_missing_person_metadata(metadata: Dict[str, Any]) -> Tuple[bool, Li
             continue
         
         # Field-specific validation
-        if field == 'case_id':
+        if field == 'case_id' and metadata.get('case_id'):
             if not CASE_ID_PATTERN.match(metadata[field]):
                 errors.append("Invalid case_id format (3-50 alphanumeric characters, underscores, or dashes allowed)")
         
@@ -160,9 +159,8 @@ def validate_found_person_metadata(metadata: Dict[str, Any]) -> Tuple[bool, List
     """
     errors = []
     
-    # Required fields
+    # Required fields (found_id is auto-generated, so not required)
     required_fields = {
-        'found_id': str,
         'current_age_estimate': int,
         'gender': str,
         'current_location': str,
@@ -180,7 +178,7 @@ def validate_found_person_metadata(metadata: Dict[str, Any]) -> Tuple[bool, List
             continue
         
         # Field-specific validation
-        if field == 'found_id':
+        if field == 'found_id' and metadata.get('found_id'):
             # More flexible pattern
             if not re.match(r'^[A-Za-z0-9_-]{3,50}$', metadata[field]):
                 errors.append("Invalid found_id format (3-50 alphanumeric characters, underscores, or dashes allowed)")
