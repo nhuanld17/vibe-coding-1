@@ -52,6 +52,7 @@ class MissingPersonMetadata(BaseModel):
 class FoundPersonMetadata(BaseModel):
     """Found person metadata schema."""
     found_id: Optional[str] = Field(None, description="Unique found person identifier (auto-generated if not provided)", example="FOUND_2023_001")
+    name: Optional[str] = Field(None, min_length=2, max_length=100, description="Name of the found person (optional)", example="John Doe")
     current_age_estimate: int = Field(..., ge=0, le=120, description="Estimated current age", example=30)
     gender: GenderEnum = Field(..., description="Gender", example="male")
     current_location: str = Field(..., min_length=3, max_length=200, description="Current location", example="Los Angeles, CA")
