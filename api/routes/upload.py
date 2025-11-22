@@ -141,6 +141,18 @@ def format_match_results(
     return formatted_matches
 
 
+def _generate_timestamp_id(prefix: str) -> str:
+    """
+    Generate a simple timestamp-based identifier that is URL-safe and
+    matches the repository's relaxed validation pattern (A-Za-z0-9_-).
+
+    Example: MISS_1734739200123
+    """
+    # Use milliseconds to reduce collision chance in quick successive requests
+    millis = int(time.time() * 1000)
+    return f"{prefix}_{millis}"
+
+
 @router.post("/missing", response_model=UploadResponse)
 async def upload_missing_person(
     settings: SettingsDep,
@@ -180,8 +192,9 @@ async def upload_missing_person(
         # Parse and validate metadata
         try:
             metadata_dict = json.loads(metadata)
+            # Auto-generate case_id if missing or empty
             if not metadata_dict.get("case_id"):
-                metadata_dict["case_id"] = generate_case_id()
+                metadata_dict["case_id"] = _generate_timestamp_id("MISS")
             missing_metadata = MissingPersonMetadata(**metadata_dict)
         except json.JSONDecodeError:
             raise HTTPException(
@@ -309,8 +322,9 @@ async def upload_found_person(
         # Parse and validate metadata
         try:
             metadata_dict = json.loads(metadata)
+            # Auto-generate found_id if missing or empty
             if not metadata_dict.get("found_id"):
-                metadata_dict["found_id"] = generate_found_id()
+                metadata_dict["found_id"] = _generate_timestamp_id("FOUND")
             found_metadata = FoundPersonMetadata(**metadata_dict)
         except json.JSONDecodeError:
             raise HTTPException(
