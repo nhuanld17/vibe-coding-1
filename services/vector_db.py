@@ -60,11 +60,14 @@ class VectorDatabaseService:
         
         try:
             # Initialize Qdrant client
+            # Use https=False for Docker internal connections
             self.client = QdrantClient(
                 host=host,
                 port=port,
                 api_key=api_key,
-                timeout=timeout
+                timeout=timeout,
+                https=False,
+                prefer_grpc=False
             )
             
             # Test connection

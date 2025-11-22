@@ -135,6 +135,7 @@ class MatchResult(BaseModel):
     explanation: ConfidenceExplanation = Field(..., description="Detailed confidence explanation")
     contact: str = Field(..., description="Contact information for this match")
     metadata: Dict[str, Any] = Field(..., description="Full metadata of the matched record")
+    image_url: Optional[str] = Field(None, description="Cloudinary URL of the matched person's image")
 
 
 class UploadResponse(BaseModel):
@@ -147,6 +148,7 @@ class UploadResponse(BaseModel):
     processing_time_ms: Optional[float] = Field(None, description="Processing time in milliseconds")
     case_id: Optional[str] = Field(None, description="Auto-generated case identifier (for missing uploads)")
     found_id: Optional[str] = Field(None, description="Auto-generated found identifier (for found uploads)")
+    image_url: Optional[str] = Field(None, description="Cloudinary URL of uploaded image")
 
 
 class SearchResponse(BaseModel):

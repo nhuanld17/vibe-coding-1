@@ -49,10 +49,10 @@ class Settings(BaseSettings):
         description="Minimum confidence for face detection"
     )
     similarity_threshold: float = Field(
-        default=0.50,
+        default=0.80,
         ge=0.0,
         le=1.0,
-        description="Minimum similarity for face matching"
+        description="Minimum similarity for face matching (increased to reduce false positives)"
     )
     top_k_matches: int = Field(
         default=10,
@@ -67,6 +67,13 @@ class Settings(BaseSettings):
     minio_secret_key: str = Field(default="minioadmin123", description="MinIO secret key")
     minio_bucket_name: str = Field(default="missing-person-images", description="MinIO bucket name")
     minio_use_ssl: bool = Field(default=False, description="Use SSL for MinIO")
+    
+    # Cloudinary Configuration
+    cloudinary_cloud_name: Optional[str] = Field(default=None, description="Cloudinary cloud name")
+    cloudinary_api_key: Optional[str] = Field(default=None, description="Cloudinary API key")
+    cloudinary_api_secret: Optional[str] = Field(default=None, description="Cloudinary API secret")
+    cloudinary_folder_missing: str = Field(default="MISS_IMG", description="Cloudinary folder for missing person images")
+    cloudinary_folder_found: str = Field(default="FOUND_IMG", description="Cloudinary folder for found person images")
     
     # Upload Configuration
     max_upload_size_mb: int = Field(

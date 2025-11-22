@@ -431,6 +431,12 @@ class ConfidenceScoringService:
         elif gender_match == 0.0:
             reasons.append("Gender information conflicts")
         
+        # Warning for suspicious high face similarity with low metadata
+        if factors.face_similarity > 0.95 and factors.metadata_consistency < 0.3:
+            reasons.append("⚠️ WARNING: Very high face similarity but very low metadata consistency - possible false positive")
+        elif factors.face_similarity > 0.90 and factors.metadata_consistency < 0.4:
+            reasons.append("⚠️ CAUTION: High face similarity but low metadata consistency - verify carefully")
+        
         return reasons
     
     def _generate_summary(
@@ -457,6 +463,12 @@ class ConfidenceScoringService:
             base_summary += " Facial features strongly support this match."
         elif factors.age_plausibility >= 0.8:
             base_summary += " Age progression strongly supports this match."
+        
+        # Add warning for suspicious matches
+        if factors.face_similarity > 0.95 and factors.metadata_consistency < 0.3:
+            base_summary += " ⚠️ WARNING: Despite high face similarity, metadata does not align well - verify carefully to avoid false positive."
+        elif factors.face_similarity > 0.90 and factors.metadata_consistency < 0.4:
+            base_summary += " ⚠️ CAUTION: High face similarity but metadata inconsistencies detected - additional verification recommended."
         
         return base_summary
     
