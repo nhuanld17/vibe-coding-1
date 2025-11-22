@@ -125,6 +125,15 @@ class Settings(BaseSettings):
         description="Access token expiration in minutes"
     )
     
+    # Email Configuration (SMTP)
+    smtp_host: Optional[str] = Field(default=None, description="SMTP server host")
+    smtp_port: int = Field(default=587, description="SMTP server port")
+    smtp_user: Optional[str] = Field(default=None, description="SMTP username")
+    smtp_password: Optional[str] = Field(default=None, description="SMTP password")
+    smtp_from_email: Optional[str] = Field(default=None, description="Sender email address")
+    smtp_use_tls: bool = Field(default=True, description="Use TLS for SMTP")
+    smtp_enabled: bool = Field(default=False, description="Enable email notifications")
+    
     class Config:
         """Pydantic configuration."""
         env_file = ".env"
