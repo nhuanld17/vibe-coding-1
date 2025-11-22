@@ -6,6 +6,7 @@ missing or found persons by their IDs.
 """
 
 import time
+import numpy as np
 from typing import Optional
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from loguru import logger
@@ -110,13 +111,11 @@ async def search_missing_person(
     try:
         logger.info(f"Searching for missing person with case_id: {case_id}")
         
-        # Search for records with matching case_id
-        search_results = vector_db.search_similar_faces(
-            query_embedding=None,  # We'll search by metadata filter only
+        # Search for records with matching case_id using metadata search
+        search_results = vector_db.search_by_metadata(
             collection_name="missing_persons",
-            limit=limit,
-            score_threshold=0.0,  # Accept all scores for metadata search
-            filters={'case_id': case_id}
+            filters={'case_id': case_id},
+            limit=limit
         )
         
         if not search_results:
@@ -141,10 +140,9 @@ async def search_missing_person(
         # If include_similar is True and we have the embedding, find similar records
         if include_similar and matches and limit > 1:
             try:
-                # Get the embedding of the first match
-                first_match_data = vector_db.get_point_by_id("missing_persons", matches[0].id)
-                if first_match_data and 'vector' in first_match_data:
-                    embedding = first_match_data['vector']
+                # Get the embedding of the first match from search results
+                if search_results and 'vector' in search_results[0]:
+                    embedding = np.array(search_results[0]['vector'])
                     
                     # Search for similar faces
                     similar_results = vector_db.search_similar_faces(
@@ -283,13 +281,11 @@ async def search_found_person(
     try:
         logger.info(f"Searching for found person with found_id: {found_id}")
         
-        # Search for records with matching found_id
-        search_results = vector_db.search_similar_faces(
-            query_embedding=None,  # We'll search by metadata filter only
+        # Search for records with matching found_id using metadata search
+        search_results = vector_db.search_by_metadata(
             collection_name="found_persons",
-            limit=limit,
-            score_threshold=0.0,  # Accept all scores for metadata search
-            filters={'found_id': found_id}
+            filters={'found_id': found_id},
+            limit=limit
         )
         
         if not search_results:
@@ -314,10 +310,9 @@ async def search_found_person(
         # If include_similar is True and we have the embedding, find similar records
         if include_similar and matches and limit > 1:
             try:
-                # Get the embedding of the first match
-                first_match_data = vector_db.get_point_by_id("found_persons", matches[0].id)
-                if first_match_data and 'vector' in first_match_data:
-                    embedding = first_match_data['vector']
+                # Get the embedding of the first match from search results
+                if search_results and 'vector' in search_results[0]:
+                    embedding = np.array(search_results[0]['vector'])
                     
                     # Search for similar faces
                     similar_results = vector_db.search_similar_faces(

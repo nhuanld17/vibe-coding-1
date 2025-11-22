@@ -358,13 +358,14 @@ class VectorDatabaseService:
                     search_filter = Filter(must=conditions)
             
             # Perform search
-            search_results = self.client.search(
+            from qdrant_client.models import SearchRequest
+            search_results = self.client.query_points(
                 collection_name=collection_name,
-                query_vector=query_embedding.tolist(),
+                query=query_embedding.tolist(),
                 query_filter=search_filter,
                 limit=limit,
                 score_threshold=score_threshold
-            )
+            ).points
             
             # Format results
             results = []
@@ -382,6 +383,59 @@ class VectorDatabaseService:
         except Exception as e:
             logger.error(f"Search failed: {str(e)}")
             raise RuntimeError(f"Search failed: {str(e)}")
+    
+    def search_by_metadata(self, collection_name: str, filters: Dict[str, Any], limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Search for points by metadata only (no vector search).
+        
+        Args:
+            collection_name: Name of the collection
+            filters: Dictionary of metadata filters
+            limit: Maximum number of results
+            
+        Returns:
+            List of matching points
+        """
+        try:
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            
+            # Build filter
+            conditions = []
+            for key, value in filters.items():
+                conditions.append(
+                    FieldCondition(
+                        key=key,
+                        match=MatchValue(value=value)
+                    )
+                )
+            
+            search_filter = Filter(must=conditions) if conditions else None
+            
+            # Use scroll to get points by filter
+            scroll_result = self.client.scroll(
+                collection_name=collection_name,
+                scroll_filter=search_filter,
+                limit=limit,
+                with_payload=True,
+                with_vectors=True
+            )
+            
+            # Format results
+            results = []
+            for point in scroll_result[0]:  # scroll returns (points, next_page_offset)
+                results.append({
+                    'id': str(point.id),
+                    'score': 1.0,  # No similarity score for metadata-only search
+                    'payload': point.payload,
+                    'vector': point.vector
+                })
+            
+            logger.debug(f"Found {len(results)} points matching filters in {collection_name}")
+            return results
+            
+        except Exception as e:
+            logger.error(f"Metadata search failed: {str(e)}")
+            raise RuntimeError(f"Metadata search failed: {str(e)}")
     
     def delete_point(self, collection_name: str, point_id: str) -> bool:
         """
