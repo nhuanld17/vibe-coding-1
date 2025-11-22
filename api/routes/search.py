@@ -421,3 +421,111 @@ async def search_found_person(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error during search"
         )
+
+
+@router.get("/cases/all")
+async def list_all_cases(
+    vector_db: VectorDBDep,
+    confidence_scoring: ConfidenceScoringDep,
+    limit: int = Query(default=100, ge=1, le=500, description="Maximum number of results per collection"),
+    case_type: Optional[str] = Query(default=None, alias="type", description="Filter by type: 'missing', 'found', or None for both")
+):
+    """
+    List all missing and found person cases.
+    
+    This endpoint retrieves all cases from both collections, optionally filtered by type.
+    
+    Args:
+        limit: Maximum number of results to return per collection
+        case_type: Optional filter by type ('missing', 'found', or None for both)
+        
+    Returns:
+        Dictionary containing lists of missing and found cases
+    """
+    start_time = time.time()
+    
+    try:
+        logger.info(f"Listing all cases with limit={limit}, type={case_type}")
+        
+        all_cases = {
+            'missing': [],
+            'found': []
+        }
+        
+        # Get missing persons if case_type is None or 'missing'
+        if case_type is None or case_type == 'missing':
+            try:
+                missing_points, _ = vector_db.list_all_points(
+                    collection_name="missing_persons",
+                    limit=limit
+                )
+                
+                for point_data in missing_points:
+                    try:
+                        match_result = format_search_result(
+                            {
+                                'id': point_data['id'],
+                                'payload': point_data['payload'],
+                                'vector': None  # Not needed for listing
+                            },
+                            confidence_scoring
+                        )
+                        all_cases['missing'].append(match_result)
+                    except Exception as e:
+                        logger.error(f"Failed to format missing person {point_data['id']}: {str(e)}")
+                        continue
+            except Exception as e:
+                logger.error(f"Failed to list missing persons: {str(e)}")
+                # Continue with found persons even if missing fails
+        
+        # Get found persons if case_type is None or 'found'
+        if case_type is None or case_type == 'found':
+            try:
+                found_points, _ = vector_db.list_all_points(
+                    collection_name="found_persons",
+                    limit=limit
+                )
+                
+                for point_data in found_points:
+                    try:
+                        match_result = format_search_result(
+                            {
+                                'id': point_data['id'],
+                                'payload': point_data['payload'],
+                                'vector': None  # Not needed for listing
+                            },
+                            confidence_scoring
+                        )
+                        all_cases['found'].append(match_result)
+                    except Exception as e:
+                        logger.error(f"Failed to format found person {point_data['id']}: {str(e)}")
+                        continue
+            except Exception as e:
+                logger.error(f"Failed to list found persons: {str(e)}")
+                # Continue even if found fails
+        
+        processing_time = (time.time() - start_time) * 1000
+        
+        # Calculate statistics
+        total_missing = len(all_cases['missing'])
+        total_found = len(all_cases['found'])
+        total_cases = total_missing + total_found
+        
+        return {
+            'success': True,
+            'message': f'Retrieved {total_cases} cases ({total_missing} missing, {total_found} found)',
+            'cases': all_cases,
+            'statistics': {
+                'total_missing': total_missing,
+                'total_found': total_found,
+                'total_cases': total_cases
+            },
+            'processing_time_ms': processing_time
+        }
+        
+    except Exception as e:
+        logger.error(f"List all cases failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error: {str(e)}"
+        )
