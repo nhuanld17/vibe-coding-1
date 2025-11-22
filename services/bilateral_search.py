@@ -80,21 +80,35 @@ class BilateralSearchService:
             filters = self._extract_search_filters(found_metadata, 'missing')
             
             # Search in missing persons collection
+            # Use lower threshold for initial search, filters will be applied in reranking
             vector_matches = self.vector_db.search_similar_faces(
                 query_embedding=found_embedding,
                 collection_name="missing_persons",
-                limit=limit * 2,  # Get more results for reranking
-                score_threshold=self.face_threshold,
-                filters=filters
+                limit=limit * 5,  # Get more results for reranking
+                score_threshold=0.45,  # Very low threshold for initial search to catch all potential matches
+                filters=None  # Don't apply filters in vector search, apply in reranking
             )
+            
+            logger.info(f"Vector search returned {len(vector_matches)} candidates for missing persons")
             
             # Rerank with metadata similarity
             reranked_matches = self._rerank_with_metadata(
                 vector_matches, found_metadata, 'missing'
             )
             
+            # Filter by minimum combined score or face similarity (more lenient)
+            # Accept matches with good face similarity OR good combined score OR decent face similarity with good metadata
+            filtered_matches = [
+                m for m in reranked_matches 
+                if (m['face_similarity'] >= self.face_threshold) or 
+                   (m['combined_score'] >= 0.55) or
+                   (m['face_similarity'] >= 0.50 and m['metadata_similarity'] >= 0.60)
+            ]
+            
+            logger.info(f"After filtering: {len(filtered_matches)} matches (from {len(reranked_matches)} reranked)")
+            
             # Limit results
-            final_matches = reranked_matches[:limit]
+            final_matches = filtered_matches[:limit]
             
             logger.info(f"Found {len(final_matches)} potential missing person matches")
             return final_matches
@@ -134,21 +148,35 @@ class BilateralSearchService:
             filters = self._extract_search_filters(missing_metadata, 'found')
             
             # Search in found persons collection
+            # Use lower threshold for initial search, filters will be applied in reranking
             vector_matches = self.vector_db.search_similar_faces(
                 query_embedding=missing_embedding,
                 collection_name="found_persons",
-                limit=limit * 2,  # Get more results for reranking
-                score_threshold=self.face_threshold,
-                filters=filters
+                limit=limit * 5,  # Get more results for reranking
+                score_threshold=0.45,  # Very low threshold for initial search to catch all potential matches
+                filters=None  # Don't apply filters in vector search, apply in reranking
             )
+            
+            logger.info(f"Vector search returned {len(vector_matches)} candidates for found persons")
             
             # Rerank with metadata similarity
             reranked_matches = self._rerank_with_metadata(
                 vector_matches, missing_metadata, 'found'
             )
             
+            # Filter by minimum combined score or face similarity (more lenient)
+            # Accept matches with good face similarity OR good combined score OR decent face similarity with good metadata
+            filtered_matches = [
+                m for m in reranked_matches 
+                if (m['face_similarity'] >= self.face_threshold) or 
+                   (m['combined_score'] >= 0.55) or
+                   (m['face_similarity'] >= 0.50 and m['metadata_similarity'] >= 0.60)
+            ]
+            
+            logger.info(f"After filtering: {len(filtered_matches)} matches (from {len(reranked_matches)} reranked)")
+            
             # Limit results
-            final_matches = reranked_matches[:limit]
+            final_matches = filtered_matches[:limit]
             
             logger.info(f"Found {len(final_matches)} potential found person matches")
             return final_matches
@@ -175,19 +203,23 @@ class BilateralSearchService:
         filters = {}
         
         try:
-            # Gender filter (exact match)
-            if 'gender' in metadata:
+            # Gender filter (exact match) - but don't enforce too strictly
+            # Only filter by gender if it's not 'unknown' or 'other'
+            if 'gender' in metadata and metadata['gender'] not in ['unknown', 'other', '']:
                 filters['gender'] = metadata['gender']
             
-            # Age range filter
+            # Age range filter (more flexible)
             if search_type == 'missing':
                 # Searching missing persons with found person data
                 if 'current_age_estimate' in metadata:
                     current_age = metadata['current_age_estimate']
-                    # Calculate possible age range at disappearance
-                    min_age_at_disappearance = max(0, current_age - 30)  # Max 30 years missing
-                    max_age_at_disappearance = current_age - 1  # At least 1 year missing
-                    filters['age_range'] = [min_age_at_disappearance, max_age_at_disappearance]
+                    # Calculate possible age range at disappearance (more flexible)
+                    # Allow wider range to catch more potential matches
+                    min_age_at_disappearance = max(0, current_age - 50)  # Max 50 years missing
+                    max_age_at_disappearance = min(120, current_age + 5)  # Allow some tolerance
+                    # Only apply filter if range is reasonable
+                    if min_age_at_disappearance <= max_age_at_disappearance:
+                        filters['age_range'] = [min_age_at_disappearance, max_age_at_disappearance]
             
             elif search_type == 'found':
                 # Searching found persons with missing person data

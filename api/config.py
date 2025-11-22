@@ -49,7 +49,7 @@ class Settings(BaseSettings):
         description="Minimum confidence for face detection"
     )
     similarity_threshold: float = Field(
-        default=0.65,
+        default=0.50,
         ge=0.0,
         le=1.0,
         description="Minimum similarity for face matching"

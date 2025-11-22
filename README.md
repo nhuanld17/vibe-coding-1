@@ -17,6 +17,7 @@
 - [Quick Start](#-quick-start)
 - [System Requirements](#-system-requirements)
 - [Installation](#-installation)
+- [Configuration](#-configuration)
 - [Usage](#-usage)
 - [API Documentation](#-api-documentation)
 - [Testing](#-testing)
@@ -59,6 +60,7 @@
 - **Multi-factor Confidence** - Weighted scoring based on multiple factors
 - **Persistent Storage** - All data persists across restarts
 - **Comprehensive Logging** - Full audit trail of all operations
+- **List All Cases** - Retrieve all missing and found cases with filtering
 
 ---
 
@@ -84,6 +86,7 @@ curl http://localhost:8000/health
 ### ✅ You're Ready!
 - **API Server**: http://localhost:8000
 - **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
 - **Qdrant Dashboard**: http://localhost:6333/dashboard
 
 ---
@@ -167,6 +170,43 @@ sudo apt install python3.11 python3-pip
 
 ---
 
+## ⚙️ Configuration
+
+### Environment Variables
+
+Create a `.env` file in the project root (optional):
+
+```env
+# API Settings
+API_HOST=0.0.0.0
+API_PORT=8000
+DEBUG=false
+
+# Qdrant Settings
+QDRANT_HOST=localhost
+QDRANT_PORT=6333
+QDRANT_API_KEY=
+
+# Model Settings
+ARCFACE_MODEL_PATH=models/weights/arcface_r100_v1.onnx
+USE_GPU=false
+FACE_CONFIDENCE_THRESHOLD=0.9
+SIMILARITY_THRESHOLD=0.65
+
+# CORS Settings
+CORS_ORIGINS=http://localhost:3000,http://localhost:5173
+
+# Logging
+LOG_LEVEL=INFO
+LOG_FILE=logs/app.log
+```
+
+### Configuration File
+
+All settings are managed in `api/config.py`. Default values work out of the box.
+
+---
+
 ## 📚 Usage
 
 ### Option 1: Python Scripts (Recommended)
@@ -194,14 +234,16 @@ import json
 
 # Upload missing person
 metadata = {
-    "case_id": "MISS_2024_001",
+    "case_id": "MISS_2024_001",  # Optional - auto-generated if not provided
     "name": "John Doe",
     "age_at_disappearance": 25,
     "year_disappeared": 2024,
     "gender": "male",
     "location_last_seen": "New York, NY",
     "contact": "family@example.com",
-    "description": "Brown hair, blue eyes"
+    "height_cm": 175,  # Optional
+    "birthmarks": ["scar on left arm"],  # Optional list
+    "additional_info": "Brown hair, blue eyes"  # Optional
 }
 
 with open("photo.jpg", 'rb') as f:
@@ -213,6 +255,7 @@ with open("photo.jpg", 'rb') as f:
 
 result = response.json()
 print(f"Uploaded: {result['point_id']}")
+print(f"Case ID: {result['case_id']}")
 print(f"Potential matches: {len(result['potential_matches'])}")
 ```
 
@@ -276,6 +319,7 @@ http://localhost:8000
 | `POST` | `/api/v1/upload/found` | Upload found person + auto-search missing persons |
 | `GET` | `/api/v1/search/missing/{case_id}` | Search for specific missing person |
 | `GET` | `/api/v1/search/found/{found_id}` | Search for specific found person |
+| `GET` | `/api/v1/search/cases/all` | List all missing and found cases |
 
 ### Upload Missing Person
 
@@ -285,19 +329,19 @@ http://localhost:8000
 - `image` (file): Photo of the missing person
 - `metadata` (string): JSON string with person information
 
-**Metadata Fields:**
+**Metadata Schema (MissingPersonMetadata):**
 ```json
 {
-  "case_id": "MISS_2024_001",          // Required: Unique case ID
-  "name": "John Doe",                  // Required: Full name
-  "age_at_disappearance": 25,          // Required: Age when disappeared
-  "year_disappeared": 2024,            // Required: Year of disappearance
-  "gender": "male",                    // Required: male/female/other
-  "location_last_seen": "New York",    // Required: Last known location
+  "case_id": "MISS_2024_001",          // Optional: Unique case ID (auto-generated if not provided)
+  "name": "John Doe",                  // Required: Full name (2-100 characters)
+  "age_at_disappearance": 25,          // Required: Age when disappeared (0-120)
+  "year_disappeared": 2024,            // Required: Year of disappearance (1900-2024)
+  "gender": "male",                    // Required: male/female/other/unknown
+  "location_last_seen": "New York, NY",// Required: Last known location (3-200 characters)
   "contact": "family@example.com",     // Required: Contact information
-  "description": "Brown hair...",      // Optional: Physical description
-  "distinctive_marks": "Scar on...",   // Optional: Distinctive features
-  "last_seen_clothing": "Blue shirt"   // Optional: Clothing description
+  "height_cm": 175,                    // Optional: Height in centimeters (50-250)
+  "birthmarks": ["scar on left arm"],  // Optional: List of birthmarks/scars (max 10 items)
+  "additional_info": "Brown hair..."   // Optional: Additional information (max 1000 characters)
 }
 ```
 
@@ -307,17 +351,22 @@ http://localhost:8000
   "success": true,
   "message": "Missing person 'John Doe' uploaded successfully",
   "point_id": "uuid-here",
+  "case_id": "MISS_2024_001",
   "potential_matches": [
     {
       "id": "match-uuid",
       "face_similarity": 0.8796,
-      "confidence_level": "MEDIUM",
-      "confidence_score": 0.6307,
+      "metadata_similarity": 0.75,
+      "combined_score": 0.8278,
+      "confidence_level": "HIGH",
+      "confidence_score": 0.7503,
       "contact": "finder@example.com",
       "metadata": { ... },
       "explanation": {
+        "confidence_level": "HIGH",
+        "confidence_score": 0.7503,
+        "factors": { ... },
         "summary": "Strong match based on facial similarity",
-        "confidence_level": "MEDIUM",
         "reasons": ["High facial similarity", "Gender match"],
         "recommendations": ["Verify with family"]
       }
@@ -339,17 +388,18 @@ http://localhost:8000
 
 **Endpoint:** `POST /api/v1/upload/found`
 
-**Metadata Fields:**
+**Metadata Schema (FoundPersonMetadata):**
 ```json
 {
-  "found_id": "FOUND_001",              // Required: Unique found ID
-  "current_age_estimate": 30,           // Required: Estimated current age
-  "gender": "male",                     // Required: male/female/other
-  "current_location": "Los Angeles",    // Required: Where found
+  "found_id": "FOUND_001",              // Optional: Unique found ID (auto-generated if not provided)
+  "name": "John Doe",                   // Optional: Name of found person (2-100 characters)
+  "current_age_estimate": 30,           // Required: Estimated current age (0-120)
+  "gender": "male",                     // Required: male/female/other/unknown
+  "current_location": "Los Angeles",    // Required: Where found (3-200 characters)
   "finder_contact": "finder@email.com", // Required: Finder's contact
-  "description": "Adult male...",       // Optional: Physical description
-  "physical_condition": "Good health",  // Optional: Health status
-  "distinctive_marks": "Tattoo on..."   // Optional: Distinctive features
+  "visible_marks": ["tattoo on arm"],   // Optional: List of visible marks (max 10 items)
+  "current_condition": "Good health",   // Optional: Current condition/status (max 500 characters)
+  "additional_info": "Adult male..."    // Optional: Additional information (max 1000 characters)
 }
 ```
 
@@ -361,25 +411,99 @@ http://localhost:8000
 
 **Parameters:**
 - `case_id` (path): The case ID to search for
-- `limit` (query, optional): Maximum results (default: 1)
+- `limit` (query, optional): Maximum results (default: 1, max: 100)
 - `include_similar` (query, optional): Include similar records (default: false)
 
 **Response:**
 ```json
 {
   "success": true,
-  "query": "MISS_2024_001",
-  "total_results": 1,
+  "message": "Found 1 record(s) for case_id 'MISS_2024_001'",
   "matches": [
     {
       "id": "uuid",
       "face_similarity": 1.0,
+      "metadata_similarity": 1.0,
+      "combined_score": 1.0,
       "confidence_level": "VERY_HIGH",
-      "metadata": { ... }
+      "confidence_score": 0.95,
+      "contact": "family@example.com",
+      "metadata": { ... },
+      "explanation": { ... }
     }
   ],
+  "total_found": 1,
+  "search_parameters": {
+    "limit": 1,
+    "threshold": 0.65,
+    "filters": null
+  },
   "processing_time_ms": 15.23
 }
+```
+
+**Endpoint:** `GET /api/v1/search/found/{found_id}`
+
+Same format as search missing person, but searches for found persons.
+
+### List All Cases
+
+**Endpoint:** `GET /api/v1/search/cases/all`
+
+**Parameters:**
+- `limit` (query, optional): Maximum results per collection (default: 100, max: 500)
+- `type` (query, optional): Filter by type - `'missing'`, `'found'`, or `null` for both (default: null)
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Retrieved 25 cases (15 missing, 10 found)",
+  "cases": {
+    "missing": [
+      {
+        "id": "uuid-1",
+        "face_similarity": 1.0,
+        "metadata_similarity": 1.0,
+        "combined_score": 1.0,
+        "confidence_level": "VERY_HIGH",
+        "confidence_score": 0.95,
+        "contact": "family@example.com",
+        "metadata": { ... }
+      }
+    ],
+    "found": [
+      {
+        "id": "uuid-2",
+        "face_similarity": 1.0,
+        "metadata_similarity": 1.0,
+        "combined_score": 1.0,
+        "confidence_level": "VERY_HIGH",
+        "confidence_score": 0.90,
+        "contact": "finder@example.com",
+        "metadata": { ... }
+      }
+    ]
+  },
+  "statistics": {
+    "total_missing": 15,
+    "total_found": 10,
+    "total_cases": 25
+  },
+  "processing_time_ms": 45.67
+}
+```
+
+**Examples:**
+```bash
+# Get all cases (default limit 100)
+curl http://localhost:8000/api/v1/search/cases/all
+
+# Get only missing persons
+curl http://localhost:8000/api/v1/search/cases/all?type=missing
+
+# Get only found persons with custom limit
+curl http://localhost:8000/api/v1/search/cases/all?type=found&limit=50
 ```
 
 ### Confidence Levels
@@ -391,6 +515,35 @@ http://localhost:8000
 | `MEDIUM` | 0.60 - 0.69 | Moderate match - further verification needed |
 | `LOW` | 0.50 - 0.59 | Weak match - use caution |
 | `VERY_LOW` | 0.00 - 0.49 | Unlikely match - low priority |
+
+### Health Check
+
+**Endpoint:** `GET /health`
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "timestamp": 1703123456.789,
+  "services": {
+    "qdrant": true,
+    "face_detector": true,
+    "embedding_extractor": true,
+    "overall": true
+  },
+  "database_stats": {
+    "missing_persons": {
+      "points_count": 150,
+      "vector_size": 512
+    },
+    "found_persons": {
+      "points_count": 75,
+      "vector_size": 512
+    }
+  },
+  "version": "1.0.0"
+}
+```
 
 ---
 
@@ -410,7 +563,21 @@ This tests:
 - ✅ Upload found person with automatic matching
 - ✅ Search by case ID
 - ✅ Search by found ID
+- ✅ List all cases
+- ✅ List cases with filter
 - ✅ Error handling (404, validation)
+
+### Individual Test Scripts
+
+**Test Upload Missing Person:**
+```bash
+python test_upload.py
+```
+
+**Test Upload Found Person:**
+```bash
+python test_upload_found.py
+```
 
 ### Manual Testing
 
@@ -507,9 +674,14 @@ family-finder-aI4life/
 ├── utils/                    # Utilities
 │   ├── image_processing.py  # Image manipulation
 │   ├── validation.py        # Input validation
+│   ├── identifiers.py       # ID generation
 │   └── logger.py            # Logging setup
+├── scripts/                  # Utility scripts
+│   └── reset_vector_db.py   # Reset database
 ├── datasets/                 # Test datasets
 │   └── FGNET_organized/     # FGNET test images
+├── logs/                     # Application logs
+│   └── app.log
 ├── docker-compose.yml        # Docker orchestration
 ├── Dockerfile               # Docker image definition
 ├── requirements.txt         # Python dependencies
@@ -725,6 +897,7 @@ curl http://localhost:8000/health
 | Vector Search | 10-50ms | Up to 10k vectors |
 | Full Upload | 500-1000ms | End-to-end |
 | Search by ID | 10-30ms | Metadata search |
+| List All Cases | 50-200ms | Depends on collection size |
 
 ### Optimization Tips
 
@@ -817,6 +990,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [ ] Real-time notification system
 - [ ] Integration with law enforcement databases
 - [ ] Blockchain for data integrity
+- [ ] Batch upload support
+- [ ] Export/import functionality
 
 ### Version History
 
@@ -825,6 +1000,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
   - Bilateral matching
   - Confidence scoring
   - Docker deployment
+  - List all cases endpoint
 
 ---
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test upload API with FGNET images."""
+"""Test upload missing person API with FGNET images."""
 import requests
 import json
 from pathlib import Path
@@ -17,19 +17,22 @@ if not image_path.exists():
 
 print(f"Testing upload with: {image_path}")
 
-# Metadata
+# Metadata theo schema mới
 metadata = {
-    "case_id": "TEST_001",
+    "case_id": "TEST_001",  # Optional - có thể để None để tự động generate
     "name": "Test Person 001",
     "age_at_disappearance": 2,
     "year_disappeared": 2023,
     "gender": "male",
     "location_last_seen": "Test Location",
-    "contact": "test@example.com"
+    "contact": "test@example.com",
+    "height_cm": None,  # Optional
+    "birthmarks": None,  # Optional - có thể là list như ["scar on left arm"]
+    "additional_info": "Test description"  # Optional
 }
 
 print(f"\nMetadata:")
-print(json.dumps(metadata, indent=2))
+print(json.dumps(metadata, indent=2, ensure_ascii=False))
 
 # Upload
 print(f"\nUploading to {API_URL}...")
@@ -48,15 +51,43 @@ try:
     print(f"\nStatus Code: {response.status_code}")
     
     if response.status_code == 200:
-        print("\nSUCCESS!")
+        print("\n✅ SUCCESS!")
         result = response.json()
-        print(json.dumps(result, indent=2))
+        
+        print(f"\nUpload Details:")
+        print(f"  Case ID: {result.get('case_id', 'N/A')}")
+        print(f"  Point ID: {result.get('point_id', 'N/A')}")
+        print(f"  Message: {result.get('message', 'N/A')}")
+        print(f"  Processing Time: {result.get('processing_time_ms', 0):.2f} ms")
+        
+        # Face quality
+        if 'face_quality' in result:
+            quality = result['face_quality']
+            print(f"\nFace Quality:")
+            print(f"  Sharpness: {quality.get('sharpness', 0):.3f}")
+            print(f"  Brightness: {quality.get('brightness', 0):.3f}")
+            print(f"  Contrast: {quality.get('contrast', 0):.3f}")
+        
+        # Potential matches
+        matches = result.get('potential_matches', [])
+        if matches:
+            print(f"\nPotential Matches Found: {len(matches)}")
+            for i, match in enumerate(matches[:3], 1):  # Show top 3
+                print(f"\n  Match {i}:")
+                print(f"    Face Similarity: {match.get('face_similarity', 0):.4f}")
+                print(f"    Confidence Level: {match.get('confidence_level', 'N/A')}")
+                print(f"    Confidence Score: {match.get('confidence_score', 0):.4f}")
+                print(f"    Contact: {match.get('contact', 'N/A')}")
+        else:
+            print(f"\nNo potential matches found.")
+        
+        print(f"\nFull Response:")
+        print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
-        print("\nERROR!")
+        print("\n❌ ERROR!")
         print(f"Response: {response.text}")
         
 except Exception as e:
-    print(f"\nEXCEPTION: {e}")
+    print(f"\n❌ EXCEPTION: {e}")
     import traceback
     traceback.print_exc()
-

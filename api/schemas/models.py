@@ -31,7 +31,7 @@ class ConfidenceLevelEnum(str, Enum):
 
 class MissingPersonMetadata(BaseModel):
     """Missing person metadata schema."""
-    case_id: str = Field(..., description="Unique case identifier", example="MISS_2023_001")
+    case_id: Optional[str] = Field(None, description="Unique case identifier (auto-generated if not provided)", example="MISS_2023_001")
     name: str = Field(..., min_length=2, max_length=100, description="Full name", example="John Doe")
     age_at_disappearance: int = Field(..., ge=0, le=120, description="Age when disappeared", example=25)
     year_disappeared: int = Field(..., ge=1900, le=2024, description="Year of disappearance", example=2020)
@@ -51,7 +51,8 @@ class MissingPersonMetadata(BaseModel):
 
 class FoundPersonMetadata(BaseModel):
     """Found person metadata schema."""
-    found_id: str = Field(..., description="Unique found person identifier", example="FOUND_2023_001")
+    found_id: Optional[str] = Field(None, description="Unique found person identifier (auto-generated if not provided)", example="FOUND_2023_001")
+    name: Optional[str] = Field(None, min_length=2, max_length=100, description="Name of the found person (optional)", example="John Doe")
     current_age_estimate: int = Field(..., ge=0, le=120, description="Estimated current age", example=30)
     gender: GenderEnum = Field(..., description="Gender", example="male")
     current_location: str = Field(..., min_length=3, max_length=200, description="Current location", example="Los Angeles, CA")
@@ -144,6 +145,8 @@ class UploadResponse(BaseModel):
     potential_matches: List[MatchResult] = Field(default_factory=list, description="Potential matches found")
     face_quality: Optional[FaceQualityMetrics] = Field(None, description="Face quality assessment")
     processing_time_ms: Optional[float] = Field(None, description="Processing time in milliseconds")
+    case_id: Optional[str] = Field(None, description="Auto-generated case identifier (for missing uploads)")
+    found_id: Optional[str] = Field(None, description="Auto-generated found identifier (for found uploads)")
 
 
 class SearchResponse(BaseModel):
