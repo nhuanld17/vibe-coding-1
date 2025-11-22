@@ -486,8 +486,10 @@ class BilateralSearchService:
         Validate a match to reject suspicious false positives.
         
         Rejects matches when:
-        1. Face similarity > 0.95 but metadata_similarity < 0.3 (suspicious false positive)
+        1. Face similarity > 0.92 but metadata_similarity < 0.35 (suspicious false positive)
         2. Face similarity > 0.90 but gender mismatch and metadata_similarity < 0.4
+        3. Face similarity > 0.90 but age_plausibility < 0.1 (very unlikely age progression)
+        4. Face similarity > 0.88 but age_plausibility < 0.05 and metadata_similarity < 0.4
         
         Args:
             match: Match dictionary with face_similarity, metadata_similarity, and match_details
@@ -500,10 +502,11 @@ class BilateralSearchService:
             metadata_sim = match.get('metadata_similarity', 0.0)
             match_details = match.get('match_details', {})
             gender_match = match_details.get('gender_match', 1.0)
+            age_consistency = match_details.get('age_consistency', 1.0)
             
-            # Reject: Very high face similarity (>0.95) but very low metadata similarity (<0.3)
+            # Reject: High face similarity (>0.92) but very low metadata similarity (<0.35)
             # This is a strong indicator of false positive (e.g., 2 different people with similar faces)
-            if face_sim > 0.95 and metadata_sim < 0.3:
+            if face_sim > 0.92 and metadata_sim < 0.35:
                 logger.warning(
                     f"Rejecting suspicious match: face_sim={face_sim:.3f} but metadata_sim={metadata_sim:.3f} "
                     f"(likely false positive)"
@@ -515,6 +518,24 @@ class BilateralSearchService:
             if face_sim > 0.90 and gender_match == 0.0 and metadata_sim < 0.4:
                 logger.warning(
                     f"Rejecting match: face_sim={face_sim:.3f} but gender mismatch and metadata_sim={metadata_sim:.3f}"
+                )
+                return False
+            
+            # Reject: High face similarity (>0.90) but very low age plausibility (<0.1)
+            # Age progression is a critical factor - if it doesn't make sense, likely false positive
+            if face_sim > 0.90 and age_consistency < 0.1:
+                logger.warning(
+                    f"Rejecting match: face_sim={face_sim:.3f} but age_consistency={age_consistency:.3f} "
+                    f"(age progression doesn't make sense, likely false positive)"
+                )
+                return False
+            
+            # Reject: Moderate-high face similarity (>0.88) with very poor age AND metadata
+            # This combination strongly suggests false positive
+            if face_sim > 0.88 and age_consistency < 0.05 and metadata_sim < 0.4:
+                logger.warning(
+                    f"Rejecting match: face_sim={face_sim:.3f} but age_consistency={age_consistency:.3f} "
+                    f"and metadata_sim={metadata_sim:.3f} (multiple red flags, likely false positive)"
                 )
                 return False
             

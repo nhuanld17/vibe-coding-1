@@ -25,6 +25,7 @@ from utils.validation import validate_file_upload, validate_missing_person_metad
 from utils.identifiers import generate_case_id, generate_found_id
 from utils.image_processing import load_image_from_bytes, normalize_image_orientation, enhance_image_quality
 from services.cloudinary_service import upload_image_to_cloudinary
+from services.email_service import send_missing_person_profile_email, send_found_person_profile_email
 
 
 router = APIRouter()
@@ -311,6 +312,26 @@ async def upload_missing_person(
         
         processing_time = (time.time() - start_time) * 1000
         
+        # Send email notification if SMTP is configured
+        if settings.smtp_enabled and settings.smtp_host and settings.smtp_user and settings.smtp_password and settings.smtp_from_email:
+            try:
+                send_missing_person_profile_email(
+                    smtp_host=settings.smtp_host,
+                    smtp_port=settings.smtp_port,
+                    smtp_user=settings.smtp_user,
+                    smtp_password=settings.smtp_password,
+                    from_email=settings.smtp_from_email,
+                    contact=contact,
+                    metadata=metadata_dict,
+                    case_id=missing_metadata.case_id,
+                    image_url=image_url,
+                    use_tls=settings.smtp_use_tls
+                )
+                logger.info(f"Email notification sent for missing person profile: {missing_metadata.case_id}")
+            except Exception as e:
+                logger.error(f"Failed to send email notification: {str(e)}")
+                # Don't fail the upload if email fails
+        
         return UploadResponse(
             success=True,
             message=f"Missing person '{missing_metadata.name}' uploaded successfully",
@@ -491,6 +512,26 @@ async def upload_found_person(
             # Don't fail the upload if search fails
         
         processing_time = (time.time() - start_time) * 1000
+        
+        # Send email notification if SMTP is configured
+        if settings.smtp_enabled and settings.smtp_host and settings.smtp_user and settings.smtp_password and settings.smtp_from_email:
+            try:
+                send_found_person_profile_email(
+                    smtp_host=settings.smtp_host,
+                    smtp_port=settings.smtp_port,
+                    smtp_user=settings.smtp_user,
+                    smtp_password=settings.smtp_password,
+                    from_email=settings.smtp_from_email,
+                    finder_contact=finder_contact,
+                    metadata=metadata_dict,
+                    found_id=found_metadata.found_id,
+                    image_url=image_url,
+                    use_tls=settings.smtp_use_tls
+                )
+                logger.info(f"Email notification sent for found person profile: {found_metadata.found_id}")
+            except Exception as e:
+                logger.error(f"Failed to send email notification: {str(e)}")
+                # Don't fail the upload if email fails
         
         return UploadResponse(
             success=True,
