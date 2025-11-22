@@ -437,6 +437,55 @@ class VectorDatabaseService:
             logger.error(f"Metadata search failed: {str(e)}")
             raise RuntimeError(f"Metadata search failed: {str(e)}")
     
+    def list_all_points(
+        self, 
+        collection_name: str, 
+        limit: int = 100, 
+        offset: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        List all points in a collection (paginated).
+        
+        Args:
+            collection_name: Name of the collection
+            limit: Maximum number of results to return
+            offset: Optional offset for pagination (next_page_offset from previous scroll)
+            
+        Returns:
+            Tuple of (list of points, next_page_offset or None)
+        """
+        try:
+            # Validate collection name
+            if collection_name not in [self.missing_collection, self.found_collection]:
+                raise ValueError(f"Invalid collection name: {collection_name}")
+            
+            # Use scroll to get all points
+            scroll_result = self.client.scroll(
+                collection_name=collection_name,
+                scroll_filter=None,  # No filter - get all points
+                limit=limit,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False  # Don't need vectors for listing
+            )
+            
+            # Format results
+            points = []
+            for point in scroll_result[0]:  # scroll returns (points, next_page_offset)
+                points.append({
+                    'id': str(point.id),
+                    'payload': point.payload
+                })
+            
+            next_offset = scroll_result[1] if scroll_result[1] else None
+            
+            logger.debug(f"Listed {len(points)} points from {collection_name}")
+            return points, next_offset
+            
+        except Exception as e:
+            logger.error(f"List all points failed: {str(e)}")
+            raise RuntimeError(f"List all points failed: {str(e)}")
+    
     def delete_point(self, collection_name: str, point_id: str) -> bool:
         """
         Delete a point from the specified collection.
