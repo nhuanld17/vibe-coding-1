@@ -15,6 +15,7 @@ from models.face_embedding import FaceEmbeddingExtractor
 from services.vector_db import VectorDatabaseService
 from services.bilateral_search import BilateralSearchService
 from services.confidence_scoring import ConfidenceScoringService
+from services.cloudinary_service import configure_cloudinary
 
 
 # Global service instances (initialized on startup)
@@ -97,6 +98,18 @@ def initialize_services(settings: Settings) -> None:
             features_weight=0.05
         )
         logger.info("Confidence scoring service initialized successfully")
+        
+        # Initialize Cloudinary (if credentials provided)
+        if settings.cloudinary_cloud_name and settings.cloudinary_api_key and settings.cloudinary_api_secret:
+            logger.info("Initializing Cloudinary...")
+            configure_cloudinary(
+                cloud_name=settings.cloudinary_cloud_name,
+                api_key=settings.cloudinary_api_key,
+                api_secret=settings.cloudinary_api_secret
+            )
+            logger.info("Cloudinary initialized successfully")
+        else:
+            logger.warning("Cloudinary credentials not provided. Image uploads to Cloudinary will be skipped.")
         
         logger.info("All services initialized successfully")
         

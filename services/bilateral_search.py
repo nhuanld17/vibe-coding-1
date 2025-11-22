@@ -166,12 +166,14 @@ class BilateralSearchService:
             
             # Filter by minimum combined score or face similarity (more lenient)
             # Accept matches with good face similarity OR good combined score OR decent face similarity with good metadata
-            filtered_matches = [
-                m for m in reranked_matches 
-                if (m['face_similarity'] >= self.face_threshold) or 
-                   (m['combined_score'] >= 0.55) or
-                   (m['face_similarity'] >= 0.50 and m['metadata_similarity'] >= 0.60)
-            ]
+            # BUT reject suspicious false positives (high face similarity but very low metadata similarity)
+            filtered_matches = []
+            for m in reranked_matches:
+                if self._validate_match(m):
+                    if (m['face_similarity'] >= self.face_threshold) or \
+                       (m['combined_score'] >= 0.55) or \
+                       (m['face_similarity'] >= 0.50 and m['metadata_similarity'] >= 0.60):
+                        filtered_matches.append(m)
             
             logger.info(f"After filtering: {len(filtered_matches)} matches (from {len(reranked_matches)} reranked)")
             
@@ -478,6 +480,49 @@ class BilateralSearchService:
         except Exception as e:
             logger.warning(f"Location plausibility check failed: {str(e)}")
             return 0.5
+    
+    def _validate_match(self, match: Dict[str, Any]) -> bool:
+        """
+        Validate a match to reject suspicious false positives.
+        
+        Rejects matches when:
+        1. Face similarity > 0.95 but metadata_similarity < 0.3 (suspicious false positive)
+        2. Face similarity > 0.90 but gender mismatch and metadata_similarity < 0.4
+        
+        Args:
+            match: Match dictionary with face_similarity, metadata_similarity, and match_details
+            
+        Returns:
+            True if match is valid, False if it should be rejected
+        """
+        try:
+            face_sim = match.get('face_similarity', 0.0)
+            metadata_sim = match.get('metadata_similarity', 0.0)
+            match_details = match.get('match_details', {})
+            gender_match = match_details.get('gender_match', 1.0)
+            
+            # Reject: Very high face similarity (>0.95) but very low metadata similarity (<0.3)
+            # This is a strong indicator of false positive (e.g., 2 different people with similar faces)
+            if face_sim > 0.95 and metadata_sim < 0.3:
+                logger.warning(
+                    f"Rejecting suspicious match: face_sim={face_sim:.3f} but metadata_sim={metadata_sim:.3f} "
+                    f"(likely false positive)"
+                )
+                return False
+            
+            # Reject: High face similarity (>0.90) with gender mismatch and low metadata similarity
+            # Gender is a strong distinguishing factor
+            if face_sim > 0.90 and gender_match == 0.0 and metadata_sim < 0.4:
+                logger.warning(
+                    f"Rejecting match: face_sim={face_sim:.3f} but gender mismatch and metadata_sim={metadata_sim:.3f}"
+                )
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.warning(f"Match validation failed: {str(e)}, allowing match")
+            return True  # On error, allow the match (fail open)
     
     def _get_match_details(
         self,

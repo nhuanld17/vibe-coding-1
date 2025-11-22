@@ -7,7 +7,7 @@ including image processing, face detection, and similarity matching.
 
 import time
 import numpy as np
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status, Depends
 from fastapi.responses import JSONResponse
 from loguru import logger
@@ -24,6 +24,7 @@ from ..schemas.models import (
 from utils.validation import validate_file_upload, validate_missing_person_metadata, validate_found_person_metadata
 from utils.identifiers import generate_case_id, generate_found_id
 from utils.image_processing import load_image_from_bytes, normalize_image_orientation, enhance_image_quality
+from services.cloudinary_service import upload_image_to_cloudinary
 
 
 router = APIRouter()
@@ -119,6 +120,9 @@ def format_match_results(
             payload = match.get('payload', {})
             contact = payload.get('contact') or payload.get('finder_contact', 'No contact available')
             
+            # Extract image_url from payload (if available)
+            match_image_url = payload.get('image_url')
+            
             # Create match result
             match_result = MatchResult(
                 id=match['id'],
@@ -129,7 +133,8 @@ def format_match_results(
                 confidence_score=confidence_score,
                 explanation=confidence_explanation,
                 contact=contact,
-                metadata=payload
+                metadata=payload,
+                image_url=match_image_url
             )
             
             formatted_matches.append(match_result)
@@ -162,7 +167,15 @@ async def upload_missing_person(
     bilateral_search: BilateralSearchDep,
     confidence_scoring: ConfidenceScoringDep,
     image: UploadFile = File(..., description="Face image of the missing person"),
-    metadata: str = Form(..., description="Missing person metadata as JSON string")
+    name: str = Form(..., description="Full name"),
+    age_at_disappearance: int = Form(..., description="Age when disappeared"),
+    year_disappeared: int = Form(..., description="Year of disappearance"),
+    gender: str = Form(..., description="Gender: male, female, other, or unknown"),
+    location_last_seen: str = Form(..., description="Last known location"),
+    contact: str = Form(..., description="Contact information"),
+    height_cm: Optional[int] = Form(None, description="Height in centimeters (optional)"),
+    birthmarks: Optional[str] = Form(None, description="List of birthmarks/scars, separated by commas (optional)"),
+    additional_info: Optional[str] = Form(None, description="Additional information (optional)")
 ):
     """
     Upload a missing person's photo and metadata.
@@ -189,18 +202,34 @@ async def upload_missing_person(
                 detail=f"Invalid file: {file_error}"
             )
         
-        # Parse and validate metadata
+        # Build metadata dictionary from form fields
+        metadata_dict = {
+            "case_id": _generate_timestamp_id("MISS"),  # Auto-generate case_id
+            "name": name,
+            "age_at_disappearance": age_at_disappearance,
+            "year_disappeared": year_disappeared,
+            "gender": gender.lower(),
+            "location_last_seen": location_last_seen,
+            "contact": contact
+        }
+        
+        # Add optional fields
+        
+        if height_cm is not None:
+            metadata_dict["height_cm"] = height_cm
+        
+        if birthmarks:
+            # Parse comma-separated birthmarks
+            birthmarks_list = [mark.strip() for mark in birthmarks.split(",") if mark.strip()]
+            if birthmarks_list:
+                metadata_dict["birthmarks"] = birthmarks_list
+        
+        if additional_info:
+            metadata_dict["additional_info"] = additional_info
+        
+        # Validate metadata
         try:
-            metadata_dict = json.loads(metadata)
-            # Auto-generate case_id if missing or empty
-            if not metadata_dict.get("case_id"):
-                metadata_dict["case_id"] = _generate_timestamp_id("MISS")
             missing_metadata = MissingPersonMetadata(**metadata_dict)
-        except json.JSONDecodeError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid JSON in metadata field"
-            )
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -238,6 +267,25 @@ async def upload_missing_person(
                 detail="Failed to extract face embedding"
             )
         
+        # Upload image to Cloudinary (if configured) - BEFORE storing in database
+        image_url = None
+        if settings.cloudinary_cloud_name and settings.cloudinary_api_key and settings.cloudinary_api_secret:
+            try:
+                # Use original image bytes for Cloudinary upload
+                public_id = f"missing_{missing_metadata.case_id}"
+                upload_result = upload_image_to_cloudinary(
+                    image_bytes=image_bytes,
+                    folder=settings.cloudinary_folder_missing,
+                    public_id=public_id
+                )
+                image_url = upload_result.get("secure_url")
+                logger.info(f"Image uploaded to Cloudinary: {image_url}")
+                # Add image_url to metadata to store in database
+                metadata_dict['image_url'] = image_url
+            except Exception as e:
+                logger.warning(f"Failed to upload image to Cloudinary: {str(e)}")
+                # Don't fail the upload if Cloudinary upload fails
+        
         # Store in vector database
         try:
             point_id = vector_db.insert_missing_person(embedding, metadata_dict)
@@ -270,7 +318,8 @@ async def upload_missing_person(
             potential_matches=potential_matches,
             face_quality=face_quality,
             processing_time_ms=processing_time,
-            case_id=missing_metadata.case_id
+            case_id=missing_metadata.case_id,
+            image_url=image_url
         )
         
     except HTTPException:
@@ -292,7 +341,14 @@ async def upload_found_person(
     bilateral_search: BilateralSearchDep,
     confidence_scoring: ConfidenceScoringDep,
     image: UploadFile = File(..., description="Face image of the found person"),
-    metadata: str = Form(..., description="Found person metadata as JSON string")
+    name: Optional[str] = Form(None, description="Name of the found person (optional)"),
+    current_age_estimate: int = Form(..., description="Estimated current age"),
+    gender: str = Form(..., description="Gender: male, female, other, or unknown"),
+    current_location: str = Form(..., description="Current location"),
+    finder_contact: str = Form(..., description="Finder contact information"),
+    visible_marks: Optional[str] = Form(None, description="List of visible marks/scars, separated by commas (optional)"),
+    current_condition: Optional[str] = Form(None, description="Current condition/status (optional)"),
+    additional_info: Optional[str] = Form(None, description="Additional information (optional)")
 ):
     """
     Upload a found person's photo and metadata.
@@ -319,18 +375,35 @@ async def upload_found_person(
                 detail=f"Invalid file: {file_error}"
             )
         
-        # Parse and validate metadata
+        # Build metadata dictionary from form fields
+        metadata_dict = {
+            "found_id": _generate_timestamp_id("FOUND"),  # Auto-generate found_id
+            "current_age_estimate": current_age_estimate,
+            "gender": gender.lower(),
+            "current_location": current_location,
+            "finder_contact": finder_contact
+        }
+        
+        # Add optional fields
+        
+        if name:
+            metadata_dict["name"] = name
+        
+        if visible_marks:
+            # Parse comma-separated visible marks
+            marks_list = [mark.strip() for mark in visible_marks.split(",") if mark.strip()]
+            if marks_list:
+                metadata_dict["visible_marks"] = marks_list
+        
+        if current_condition:
+            metadata_dict["current_condition"] = current_condition
+        
+        if additional_info:
+            metadata_dict["additional_info"] = additional_info
+        
+        # Validate metadata
         try:
-            metadata_dict = json.loads(metadata)
-            # Auto-generate found_id if missing or empty
-            if not metadata_dict.get("found_id"):
-                metadata_dict["found_id"] = _generate_timestamp_id("FOUND")
             found_metadata = FoundPersonMetadata(**metadata_dict)
-        except json.JSONDecodeError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid JSON in metadata field"
-            )
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -367,6 +440,25 @@ async def upload_found_person(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to extract face embedding"
             )
+        
+        # Upload image to Cloudinary (if configured) - BEFORE storing in database
+        image_url = None
+        if settings.cloudinary_cloud_name and settings.cloudinary_api_key and settings.cloudinary_api_secret:
+            try:
+                # Use original image bytes for Cloudinary upload
+                public_id = f"found_{found_metadata.found_id}"
+                upload_result = upload_image_to_cloudinary(
+                    image_bytes=image_bytes,
+                    folder=settings.cloudinary_folder_found,
+                    public_id=public_id
+                )
+                image_url = upload_result.get("secure_url")
+                logger.info(f"Image uploaded to Cloudinary: {image_url}")
+                # Add image_url to metadata to store in database
+                metadata_dict['image_url'] = image_url
+            except Exception as e:
+                logger.warning(f"Failed to upload image to Cloudinary: {str(e)}")
+                # Don't fail the upload if Cloudinary upload fails
         
         # Store in vector database
         try:
@@ -407,7 +499,8 @@ async def upload_found_person(
             potential_matches=potential_matches,
             face_quality=face_quality,
             processing_time_ms=processing_time,
-            found_id=found_metadata.found_id
+            found_id=found_metadata.found_id,
+            image_url=image_url
         )
         
     except HTTPException:

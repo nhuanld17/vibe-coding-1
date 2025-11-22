@@ -65,6 +65,9 @@ def format_search_result(point_data: dict, confidence_scoring) -> MatchResult:
         payload = point_data['payload']
         contact = payload.get('contact') or payload.get('finder_contact', 'No contact available')
         
+        # Extract image_url from payload (if available)
+        image_url = payload.get('image_url')
+        
         # Create match result
         return MatchResult(
             id=point_data['id'],
@@ -75,7 +78,8 @@ def format_search_result(point_data: dict, confidence_scoring) -> MatchResult:
             confidence_score=confidence_score,
             explanation=confidence_explanation,
             contact=contact,
-            metadata=payload
+            metadata=payload,
+            image_url=image_url
         )
         
     except Exception as e:
@@ -201,6 +205,9 @@ async def search_missing_person(
                                     # Extract contact information
                                     contact = point_data['payload'].get('contact', 'No contact available')
                                     
+                                    # Extract image_url from payload (if available)
+                                    image_url = point_data['payload'].get('image_url')
+                                    
                                     similar_match = MatchResult(
                                         id=result['id'],
                                         face_similarity=result['score'],
@@ -210,7 +217,8 @@ async def search_missing_person(
                                         confidence_score=confidence_score,
                                         explanation=confidence_explanation,
                                         contact=contact,
-                                        metadata=point_data['payload']
+                                        metadata=point_data['payload'],
+                                        image_url=image_url
                                     )
                                     
                                     matches.append(similar_match)
@@ -371,6 +379,9 @@ async def search_found_person(
                                     # Extract contact information
                                     contact = point_data['payload'].get('finder_contact', 'No contact available')
                                     
+                                    # Extract image_url from payload (if available)
+                                    image_url = point_data['payload'].get('image_url')
+                                    
                                     similar_match = MatchResult(
                                         id=result['id'],
                                         face_similarity=result['score'],
@@ -380,7 +391,8 @@ async def search_found_person(
                                         confidence_score=confidence_score,
                                         explanation=confidence_explanation,
                                         contact=contact,
-                                        metadata=point_data['payload']
+                                        metadata=point_data['payload'],
+                                        image_url=image_url
                                     )
                                     
                                     matches.append(similar_match)

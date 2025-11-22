@@ -199,7 +199,40 @@ CORS_ORIGINS=http://localhost:3000,http://localhost:5173
 # Logging
 LOG_LEVEL=INFO
 LOG_FILE=logs/app.log
+
+# Cloudinary Configuration (Optional - for image storage)
+CLOUDINARY_CLOUD_NAME=your_cloud_name
+CLOUDINARY_API_KEY=your_api_key
+CLOUDINARY_API_SECRET=your_api_secret
+CLOUDINARY_FOLDER_MISSING=MISS_IMG
+CLOUDINARY_FOLDER_FOUND=FOUND_IMG
 ```
+
+### Cloudinary Setup (Optional)
+
+To enable image storage on Cloudinary:
+
+1. **Sign up for Cloudinary**: https://cloudinary.com/users/register/free
+2. **Get your credentials** from the Dashboard:
+   - Cloud Name
+   - API Key
+   - API Secret
+3. **Add to `.env` file**:
+   ```env
+   CLOUDINARY_CLOUD_NAME=your_cloud_name
+   CLOUDINARY_API_KEY=your_api_key
+   CLOUDINARY_API_SECRET=your_api_secret
+   CLOUDINARY_FOLDER_MISSING=MISS_IMG
+   CLOUDINARY_FOLDER_FOUND=FOUND_IMG
+   ```
+
+When Cloudinary is configured, uploaded images will be automatically stored in separate folders:
+- **Missing person images**: Stored in `MISS_IMG` folder
+- **Found person images**: Stored in `FOUND_IMG` folder
+
+A `image_url` will be returned in the API response.
+
+**Note**: If Cloudinary credentials are not provided, the system will work normally but images won't be stored in the cloud.
 
 ### Configuration File
 

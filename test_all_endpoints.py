@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Test tất cả các endpoints của Missing Person AI API.
 
@@ -16,6 +17,12 @@ import requests
 import json
 from pathlib import Path
 import time
+import sys
+import io
+
+# Set UTF-8 encoding for Windows console
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 
 BASE_URL = "http://localhost:8000"
@@ -30,13 +37,17 @@ def print_section(title):
 
 def print_response(response, show_full=False):
     """In kết quả response."""
-    print(f"\n📊 Status Code: {response.status_code}")
+    print(f"\n[STATUS] Status Code: {response.status_code}")
     
     if response.status_code in [200, 201]:
-        print("✅ SUCCESS")
+        print("[SUCCESS] SUCCESS")
         data = response.json()
         if show_full:
-            print(json.dumps(data, indent=2, ensure_ascii=False))
+            try:
+                print(json.dumps(data, indent=2, ensure_ascii=False))
+            except UnicodeEncodeError:
+                # Fallback for Windows console
+                print(json.dumps(data, indent=2, ensure_ascii=True))
         else:
             # In tóm tắt
             if 'message' in data:
@@ -53,8 +64,12 @@ def print_response(response, show_full=False):
                 for i, match in enumerate(matches[:3], 1):  # Top 3
                     print(f"  Match {i}: Similarity={match.get('face_similarity', 0):.3f}, "
                           f"Confidence={match.get('confidence_level', 'N/A')}")
+                    if match.get('image_url'):
+                        print(f"    Image URL: {match.get('image_url')}")
+                    else:
+                        print(f"    Image URL: [Not available]")
     else:
-        print("❌ ERROR")
+        print("[ERROR] ERROR")
         print(response.text)
     
     return response
@@ -70,13 +85,13 @@ def test_1_health_check():
     
     if response.status_code == 200:
         data = response.json()
-        print(f"\n✅ Services Status:")
+        print(f"\n[OK] Services Status:")
         for service, status in data.get('services', {}).items():
-            icon = "✅" if status else "❌"
+            icon = "[OK]" if status else "[FAIL]"
             print(f"  {icon} {service}: {status}")
         
         if 'database_stats' in data and data['database_stats']:
-            print(f"\n📊 Database Statistics:")
+            print(f"\n[STATS] Database Statistics:")
             stats = data['database_stats']
             if 'missing_persons' in stats:
                 print(f"  Missing persons: {stats['missing_persons'].get('points_count', 0)}")
@@ -101,10 +116,10 @@ def test_3_upload_missing():
     image_path = Path("datasets/FGNET_organized/person_001/age_02.jpg")
     
     if not image_path.exists():
-        print(f"❌ ERROR: Image not found at {image_path}")
+        print(f"[ERROR] ERROR: Image not found at {image_path}")
         return None
     
-    print(f"📷 Image: {image_path}")
+    print(f"[IMAGE] Image: {image_path}")
     
     # Metadata theo schema mới
     metadata = {
@@ -115,12 +130,11 @@ def test_3_upload_missing():
         "gender": "male",
         "location_last_seen": "New York, USA",
         "contact": "family@example.com",
-        "height_cm": None,  # Optional
-        "birthmarks": None,  # Optional list
         "additional_info": "Young child with brown hair"  # Optional
+        # height_cm và birthmarks không gửi nếu không có giá trị
     }
     
-    print(f"\n📝 Metadata:")
+    print(f"\n[METADATA] Metadata:")
     print(json.dumps(metadata, indent=2, ensure_ascii=False))
     
     # Upload
@@ -140,7 +154,13 @@ def test_3_upload_missing():
     print_response(response)
     
     if response.status_code == 200:
-        return response.json()
+        data = response.json()
+        # Show image_url if available
+        if data.get('image_url'):
+            print(f"\n[IMAGE] Uploaded Image URL: {data.get('image_url')}")
+        else:
+            print(f"\n[IMAGE] Image URL: [Not available - Cloudinary not configured]")
+        return data
     return None
 
 
@@ -152,26 +172,25 @@ def test_4_upload_found(case_id="DEMO_MISSING_001"):
     image_path = Path("datasets/FGNET_organized/person_001/age_22.jpg")
     
     if not image_path.exists():
-        print(f"❌ ERROR: Image not found at {image_path}")
+        print(f"[ERROR] ERROR: Image not found at {image_path}")
         return None
     
-    print(f"📷 Image: {image_path}")
-    print(f"(Cùng người với TEST 3 nhưng lớn tuổi hơn - should match!)")
+    print(f"[IMAGE] Image: {image_path}")
+    print(f"(Cung nguoi voi TEST 3 nhung lon tuoi hon - should match!)")
     
     # Metadata theo schema mới
     metadata = {
         "found_id": "DEMO_FOUND_001",  # Optional
-        "name": None,  # Optional
         "current_age_estimate": 22,
         "gender": "male",
         "current_location": "Los Angeles, USA",
         "finder_contact": "finder@example.com",
-        "visible_marks": None,  # Optional list
         "current_condition": "Good health",  # Optional
         "additional_info": "Adult male found wandering"  # Optional
+        # name và visible_marks không gửi nếu không có giá trị
     }
     
-    print(f"\n📝 Metadata:")
+    print(f"\n[METADATA] Metadata:")
     print(json.dumps(metadata, indent=2, ensure_ascii=False))
     
     # Upload
@@ -193,10 +212,16 @@ def test_4_upload_found(case_id="DEMO_MISSING_001"):
     if response.status_code == 200:
         data = response.json()
         
+        # Show image_url if available in upload response
+        if data.get('image_url'):
+            print(f"\n[IMAGE] Uploaded Image URL: {data.get('image_url')}")
+        else:
+            print(f"\n[IMAGE] Image URL: [Not available - Cloudinary not configured]")
+        
         # Show detailed matches
         matches = data.get('potential_matches', [])
         if matches:
-            print(f"\n🎯 MATCHES FOUND: {len(matches)}")
+            print(f"\n[MATCHES] MATCHES FOUND: {len(matches)}")
             for i, match in enumerate(matches, 1):
                 print(f"\n--- Match {i} ---")
                 print(f"  Case ID: {match.get('metadata', {}).get('case_id', 'N/A')}")
@@ -205,6 +230,10 @@ def test_4_upload_found(case_id="DEMO_MISSING_001"):
                 print(f"  Confidence Level: {match.get('confidence_level', 'N/A')}")
                 print(f"  Confidence Score: {match.get('confidence_score', 0):.4f}")
                 print(f"  Contact: {match.get('contact', 'N/A')}")
+                if match.get('image_url'):
+                    print(f"  Image URL: {match.get('image_url')}")
+                else:
+                    print(f"  Image URL: [Not available - Cloudinary not configured or old record]")
                 if 'explanation' in match:
                     print(f"  Summary: {match['explanation'].get('summary', 'N/A')}")
         
@@ -239,6 +268,10 @@ def test_5_search_missing(case_id="DEMO_MISSING_001"):
             print(f"  Age at disappearance: {metadata.get('age_at_disappearance')}")
             print(f"  Location: {metadata.get('location_last_seen')}")
             print(f"  Confidence Score: {match.get('confidence_score', 0):.4f}")
+            if match.get('image_url'):
+                print(f"  Image URL: {match.get('image_url')}")
+            else:
+                print(f"  Image URL: [Not available]")
         
         return data
     return None
@@ -270,6 +303,10 @@ def test_6_search_found(found_id="DEMO_FOUND_001"):
             print(f"  Current age: {metadata.get('current_age_estimate')}")
             print(f"  Location: {metadata.get('current_location')}")
             print(f"  Confidence Score: {match.get('confidence_score', 0):.4f}")
+            if match.get('image_url'):
+                print(f"  Image URL: {match.get('image_url')}")
+            else:
+                print(f"  Image URL: [Not available]")
         
         return data
     return None
@@ -295,7 +332,7 @@ def test_7_list_all_cases():
         stats = data.get('statistics', {})
         cases = data.get('cases', {})
         
-        print(f"\n📊 Statistics:")
+        print(f"\n[STATS] Statistics:")
         print(f"  Total Missing: {stats.get('total_missing', 0)}")
         print(f"  Total Found: {stats.get('total_found', 0)}")
         print(f"  Total Cases: {stats.get('total_cases', 0)}")
@@ -306,13 +343,13 @@ def test_7_list_all_cases():
         found_list = cases.get('found', [])
         
         if missing_list:
-            print(f"\n📋 Sample Missing Cases (showing first 3):")
+            print(f"\n[LIST] Sample Missing Cases (showing first 3):")
             for i, case in enumerate(missing_list[:3], 1):
                 metadata = case.get('metadata', {})
                 print(f"  {i}. {metadata.get('case_id', 'N/A')} - {metadata.get('name', 'N/A')}")
         
         if found_list:
-            print(f"\n📋 Sample Found Cases (showing first 3):")
+            print(f"\n[LIST] Sample Found Cases (showing first 3):")
             for i, case in enumerate(found_list[:3], 1):
                 metadata = case.get('metadata', {})
                 print(f"  {i}. {metadata.get('found_id', 'N/A')} - Age: {metadata.get('current_age_estimate', 'N/A')}")
@@ -338,7 +375,7 @@ def test_8_list_cases_filtered():
         if response.status_code == 200:
             data = response.json()
             stats = data.get('statistics', {})
-            print(f"✅ {case_type.upper()} cases: {stats.get('total_cases', 0)}")
+            print(f"[OK] {case_type.upper()} cases: {stats.get('total_cases', 0)}")
 
 
 def test_9_search_nonexistent():
@@ -354,7 +391,7 @@ def test_9_search_nonexistent():
     )
     
     print_response(response)
-    print(f"\n✅ Expected 404 - Got {response.status_code}")
+    print(f"\n[OK] Expected 404 - Got {response.status_code}")
 
 
 def main():
@@ -403,15 +440,15 @@ def main():
         
         # Summary
         print_section("SUMMARY")
-        print("✅ All tests completed!")
-        print("\n📚 Check Swagger UI for more details: http://localhost:8000/docs")
-        print("📊 Check Qdrant Dashboard: http://localhost:6333/dashboard")
+        print("[OK] All tests completed!")
+        print("\n[DOCS] Check Swagger UI for more details: http://localhost:8000/docs")
+        print("[DASHBOARD] Check Qdrant Dashboard: http://localhost:6333/dashboard")
         
     except requests.exceptions.ConnectionError:
-        print("\n❌ ERROR: Cannot connect to API")
+        print("\n[ERROR] ERROR: Cannot connect to API")
         print("Make sure Docker is running: docker-compose up -d")
     except Exception as e:
-        print(f"\n❌ ERROR: {e}")
+        print(f"\n[ERROR] ERROR: {e}")
         import traceback
         traceback.print_exc()
 
