@@ -124,6 +124,14 @@ class ConfidenceExplanation(BaseModel):
     threshold_info: Dict[str, float] = Field(..., description="Confidence level thresholds")
 
 
+class PersonRecord(BaseModel):
+    """Person record schema (for the queried person, not a match)."""
+    id: str = Field(..., description="Record ID")
+    contact: str = Field(..., description="Contact information")
+    metadata: Dict[str, Any] = Field(..., description="Full metadata of the record")
+    image_url: Optional[str] = Field(None, description="Cloudinary URL of the person's image")
+
+
 class MatchResult(BaseModel):
     """Match result schema."""
     id: str = Field(..., description="Match ID")
@@ -155,8 +163,8 @@ class SearchResponse(BaseModel):
     """Search response schema."""
     success: bool = Field(..., description="Whether search was successful")
     message: str = Field(..., description="Response message")
-    missing_person: Optional[MatchResult] = Field(None, description="The missing person record (when searching by missing case_id)")
-    found_person: Optional[MatchResult] = Field(None, description="The found person record (when searching by found_id)")
+    missing_person: Optional[PersonRecord] = Field(None, description="The missing person record (when searching by missing case_id)")
+    found_person: Optional[PersonRecord] = Field(None, description="The found person record (when searching by found_id)")
     matches: List[MatchResult] = Field(default_factory=list, description="Potential matches found in opposite collection (e.g., found_persons when searching missing, or missing_persons when searching found)")
     total_found: int = Field(..., description="Total number of potential matches found")
     search_parameters: SearchParameters = Field(..., description="Search parameters used")
