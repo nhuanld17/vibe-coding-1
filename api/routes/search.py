@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, status, Depends, Query
 from loguru import logger
 
 from ..dependencies import VectorDBDep, ConfidenceScoringDep, SettingsDep, BilateralSearchDep
-from ..schemas.models import SearchResponse, SearchParameters, MatchResult, ConfidenceExplanation, ConfidenceFactor
+from ..schemas.models import SearchResponse, SearchParameters, MatchResult, PersonRecord, ConfidenceExplanation, ConfidenceFactor
 from utils.validation import validate_search_parameters
 from .upload import format_match_results
 
@@ -20,71 +20,27 @@ from .upload import format_match_results
 router = APIRouter()
 
 
-def format_search_result(point_data: dict, confidence_scoring) -> MatchResult:
-    """Format a single search result with confidence scoring."""
+def format_person_record(point_data: dict) -> PersonRecord:
+    """Format a person record (the queried person, not a match)."""
     try:
-        # Create a mock match result for confidence scoring
-        mock_match = {
-            'id': point_data['id'],
-            'face_similarity': 1.0,  # Perfect match since it's the same record
-            'metadata_similarity': 1.0,
-            'combined_score': 1.0,
-            'payload': point_data['payload'],
-            'match_details': {
-                'gender_match': 1.0,
-                'age_consistency': 1.0,
-                'marks_similarity': 1.0,
-                'location_plausibility': 1.0
-            }
-        }
-        
-        # Calculate confidence (should be very high for exact matches)
-        confidence_level, confidence_score, explanation = confidence_scoring.calculate_confidence(mock_match)
-        
-        # Format confidence factors
-        factors = {}
-        for factor_name, factor_data in explanation.get('factors', {}).items():
-            factors[factor_name] = ConfidenceFactor(
-                score=factor_data['score'],
-                weight=factor_data['weight'],
-                contribution=factor_data['contribution'],
-                description=factor_data['description']
-            )
-        
-        # Create confidence explanation
-        confidence_explanation = ConfidenceExplanation(
-            confidence_level=confidence_level.value,
-            confidence_score=confidence_score,
-            factors=factors,
-            reasons=explanation.get('reasons', []),
-            summary=explanation.get('summary', ''),
-            recommendations=explanation.get('recommendations', []),
-            threshold_info=explanation.get('threshold_info', {})
-        )
+        payload = point_data['payload']
         
         # Extract contact information
-        payload = point_data['payload']
         contact = payload.get('contact') or payload.get('finder_contact', 'No contact available')
         
         # Extract image_url from payload (if available)
         image_url = payload.get('image_url')
         
-        # Create match result
-        return MatchResult(
+        # Create person record (no similarity/confidence scores since this is the original record)
+        return PersonRecord(
             id=point_data['id'],
-            face_similarity=1.0,
-            metadata_similarity=1.0,
-            combined_score=1.0,
-            confidence_level=confidence_level.value,
-            confidence_score=confidence_score,
-            explanation=confidence_explanation,
             contact=contact,
             metadata=payload,
             image_url=image_url
         )
         
     except Exception as e:
-        logger.error(f"Failed to format search result: {str(e)}")
+        logger.error(f"Failed to format person record: {str(e)}")
         raise
 
 
@@ -149,7 +105,7 @@ async def search_missing_person(
             )
         
         # Format the missing person record (just for reference, not as a match)
-        missing_person_result = format_search_result(missing_person_data, confidence_scoring)
+        missing_person_result = format_person_record(missing_person_data)
         
         # Search for potential matches in found_persons collection
         matches = []
@@ -278,7 +234,7 @@ async def search_found_person(
             )
         
         # Format the found person record (just for reference, not as a match)
-        found_person_result = format_search_result(found_person_data, confidence_scoring)
+        found_person_result = format_person_record(found_person_data)
         
         # Search for potential matches in missing_persons collection
         matches = []
