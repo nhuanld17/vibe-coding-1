@@ -45,8 +45,10 @@ logs/
 
 # Model weights (too large for git)
 models/weights/*.onnx
+models/weights/*.onnx.backup
 models/weights/*.bin
 models/weights/*.pth
+*.backup
 
 # Dataset
 FGNET/
