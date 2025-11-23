@@ -155,8 +155,10 @@ class SearchResponse(BaseModel):
     """Search response schema."""
     success: bool = Field(..., description="Whether search was successful")
     message: str = Field(..., description="Response message")
-    matches: List[MatchResult] = Field(default_factory=list, description="Search results")
-    total_found: int = Field(..., description="Total number of matches found")
+    missing_person: Optional[MatchResult] = Field(None, description="The missing person record (when searching by missing case_id)")
+    found_person: Optional[MatchResult] = Field(None, description="The found person record (when searching by found_id)")
+    matches: List[MatchResult] = Field(default_factory=list, description="Potential matches found in opposite collection (e.g., found_persons when searching missing, or missing_persons when searching found)")
+    total_found: int = Field(..., description="Total number of potential matches found")
     search_parameters: SearchParameters = Field(..., description="Search parameters used")
     processing_time_ms: Optional[float] = Field(None, description="Processing time in milliseconds")
 

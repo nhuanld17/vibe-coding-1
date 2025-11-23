@@ -11,9 +11,10 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from loguru import logger
 
-from ..dependencies import VectorDBDep, ConfidenceScoringDep, SettingsDep
+from ..dependencies import VectorDBDep, ConfidenceScoringDep, SettingsDep, BilateralSearchDep
 from ..schemas.models import SearchResponse, SearchParameters, MatchResult, ConfidenceExplanation, ConfidenceFactor
 from utils.validation import validate_search_parameters
+from .upload import format_match_results
 
 
 router = APIRouter()
@@ -91,6 +92,7 @@ def format_search_result(point_data: dict, confidence_scoring) -> MatchResult:
 async def search_missing_person(
     case_id: str,
     vector_db: VectorDBDep,
+    bilateral_search: BilateralSearchDep,
     confidence_scoring: ConfidenceScoringDep,
     settings: SettingsDep,
     limit: int = Query(default=1, ge=1, le=100, description="Maximum number of results"),
@@ -100,15 +102,15 @@ async def search_missing_person(
     Search for a specific missing person by case ID.
     
     This endpoint searches for a missing person record by their case ID
-    and optionally includes similar records based on face similarity.
+    and automatically searches for potential matches in found_persons collection.
     
     Args:
         case_id: The case ID of the missing person
-        limit: Maximum number of results to return
-        include_similar: Whether to include similar records
+        limit: Maximum number of potential matches to return (for found persons)
+        include_similar: Whether to include similar missing person records
         
     Returns:
-        SearchResponse with the found record(s)
+        SearchResponse with the missing person record and potential matches from found_persons
     """
     start_time = time.time()
     
@@ -119,7 +121,7 @@ async def search_missing_person(
         search_results = vector_db.search_by_metadata(
             collection_name="missing_persons",
             filters={'case_id': case_id},
-            limit=limit
+            limit=1  # Only need one match for the case_id
         )
         
         if not search_results:
@@ -128,111 +130,61 @@ async def search_missing_person(
                 detail=f"Missing person with case_id '{case_id}' not found"
             )
         
-        # Format results
-        matches = []
+        # Get full point data for the missing person
+        missing_person_data = None
         for result in search_results:
             try:
-                # Get full point data
                 point_data = vector_db.get_point_by_id("missing_persons", result['id'])
                 if point_data:
-                    match_result = format_search_result(point_data, confidence_scoring)
-                    matches.append(match_result)
+                    missing_person_data = point_data
+                    break
             except Exception as e:
-                logger.error(f"Failed to process search result {result['id']}: {str(e)}")
+                logger.error(f"Failed to get point data for {result['id']}: {str(e)}")
                 continue
         
-        # If include_similar is True and we have the embedding, find similar records
-        if include_similar and matches and limit > 1:
-            try:
-                # Get the embedding of the first match from search results
-                if search_results and 'vector' in search_results[0]:
-                    embedding = np.array(search_results[0]['vector'])
-                    
-                    # Search for similar faces
-                    similar_results = vector_db.search_similar_faces(
-                        query_embedding=embedding,
-                        collection_name="missing_persons",
-                        limit=limit,
-                        score_threshold=settings.similarity_threshold,
-                        filters=None  # No filters for similarity search
-                    )
-                    
-                    # Add similar results (excluding the original)
-                    for result in similar_results:
-                        if result['id'] != matches[0].id:  # Skip the original match
-                            try:
-                                point_data = vector_db.get_point_by_id("missing_persons", result['id'])
-                                if point_data:
-                                    # Create a proper match result with actual similarity scores
-                                    mock_match = {
-                                        'id': result['id'],
-                                        'face_similarity': result['score'],
-                                        'metadata_similarity': 0.5,  # Default metadata similarity
-                                        'combined_score': result['score'] * 0.7 + 0.5 * 0.3,
-                                        'payload': point_data['payload'],
-                                        'match_details': {
-                                            'gender_match': 0.5,
-                                            'age_consistency': 0.5,
-                                            'marks_similarity': 0.5,
-                                            'location_plausibility': 0.5
-                                        }
-                                    }
-                                    
-                                    # Calculate confidence
-                                    confidence_level, confidence_score, explanation = confidence_scoring.calculate_confidence(mock_match)
-                                    
-                                    # Format confidence factors
-                                    factors = {}
-                                    for factor_name, factor_data in explanation.get('factors', {}).items():
-                                        factors[factor_name] = ConfidenceFactor(
-                                            score=factor_data['score'],
-                                            weight=factor_data['weight'],
-                                            contribution=factor_data['contribution'],
-                                            description=factor_data['description']
-                                        )
-                                    
-                                    # Create confidence explanation
-                                    confidence_explanation = ConfidenceExplanation(
-                                        confidence_level=confidence_level.value,
-                                        confidence_score=confidence_score,
-                                        factors=factors,
-                                        reasons=explanation.get('reasons', []),
-                                        summary=explanation.get('summary', ''),
-                                        recommendations=explanation.get('recommendations', []),
-                                        threshold_info=explanation.get('threshold_info', {})
-                                    )
-                                    
-                                    # Extract contact information
-                                    contact = point_data['payload'].get('contact', 'No contact available')
-                                    
-                                    # Extract image_url from payload (if available)
-                                    image_url = point_data['payload'].get('image_url')
-                                    
-                                    similar_match = MatchResult(
-                                        id=result['id'],
-                                        face_similarity=result['score'],
-                                        metadata_similarity=0.5,
-                                        combined_score=mock_match['combined_score'],
-                                        confidence_level=confidence_level.value,
-                                        confidence_score=confidence_score,
-                                        explanation=confidence_explanation,
-                                        contact=contact,
-                                        metadata=point_data['payload'],
-                                        image_url=image_url
-                                    )
-                                    
-                                    matches.append(similar_match)
-                                    
-                                    if len(matches) >= limit:
-                                        break
-                                        
-                            except Exception as e:
-                                logger.error(f"Failed to process similar result {result['id']}: {str(e)}")
-                                continue
-                                
-            except Exception as e:
-                logger.error(f"Failed to find similar records: {str(e)}")
-                # Continue without similar records
+        if not missing_person_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Missing person with case_id '{case_id}' not found"
+            )
+        
+        # Format the missing person record (just for reference, not as a match)
+        missing_person_result = format_search_result(missing_person_data, confidence_scoring)
+        
+        # Search for potential matches in found_persons collection
+        matches = []
+        try:
+            # Get embedding and metadata from missing person
+            if 'vector' in missing_person_data and missing_person_data['vector'] is not None:
+                embedding = np.array(missing_person_data['vector'])
+                metadata = missing_person_data['payload']
+                
+                logger.info(f"Searching for potential matches in found_persons for case_id: {case_id}")
+                
+                # Use bilateral search to find potential matches in found_persons
+                found_matches = bilateral_search.search_for_found(
+                    missing_embedding=embedding,
+                    missing_metadata=metadata,
+                    limit=limit
+                )
+                
+                # Format the potential matches
+                matches = format_match_results(found_matches, confidence_scoring)
+                logger.info(f"Found {len(matches)} potential matches in found_persons")
+                
+            else:
+                logger.warning(f"Missing person {case_id} has no embedding vector, cannot search for matches")
+                
+        except Exception as e:
+            logger.error(f"Failed to search for potential matches: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            # Continue without potential matches - don't fail the search
+        
+        # If include_similar is True, also find similar missing person records
+        # Note: similar missing persons are added to matches but they are not "potential matches" 
+        # in the traditional sense - they're just similar records in the same collection
+        # For now, we'll skip this feature or handle it differently
         
         processing_time = (time.time() - start_time) * 1000
         
@@ -242,10 +194,14 @@ async def search_missing_person(
             filters=None
         )
         
+        # Return the missing person record + potential matches from found_persons
+        # matches now only contains potential matches from found_persons collection
         return SearchResponse(
             success=True,
-            message=f"Found {len(matches)} record(s) for case_id '{case_id}'",
-            matches=matches,
+            message=f"Found missing person with case_id '{case_id}' and {len(matches)} potential match(es) in found_persons",
+            missing_person=missing_person_result,  # The missing person record itself
+            found_person=None,  # Not applicable when searching for missing
+            matches=matches,  # Potential matches from found_persons collection only
             total_found=len(matches),
             search_parameters=search_params,
             processing_time_ms=processing_time
@@ -265,6 +221,7 @@ async def search_missing_person(
 async def search_found_person(
     found_id: str,
     vector_db: VectorDBDep,
+    bilateral_search: BilateralSearchDep,
     confidence_scoring: ConfidenceScoringDep,
     settings: SettingsDep,
     limit: int = Query(default=1, ge=1, le=100, description="Maximum number of results"),
@@ -274,15 +231,15 @@ async def search_found_person(
     Search for a specific found person by found ID.
     
     This endpoint searches for a found person record by their found ID
-    and optionally includes similar records based on face similarity.
+    and automatically searches for potential matches in missing_persons collection.
     
     Args:
         found_id: The found ID of the person
-        limit: Maximum number of results to return
-        include_similar: Whether to include similar records
+        limit: Maximum number of potential matches to return (for missing persons)
+        include_similar: Whether to include similar found person records
         
     Returns:
-        SearchResponse with the found record(s)
+        SearchResponse with the found person record and potential matches from missing_persons
     """
     start_time = time.time()
     
@@ -293,7 +250,7 @@ async def search_found_person(
         search_results = vector_db.search_by_metadata(
             collection_name="found_persons",
             filters={'found_id': found_id},
-            limit=limit
+            limit=1  # Only need one match for the found_id
         )
         
         if not search_results:
@@ -302,111 +259,56 @@ async def search_found_person(
                 detail=f"Found person with found_id '{found_id}' not found"
             )
         
-        # Format results
-        matches = []
+        # Get full point data for the found person
+        found_person_data = None
         for result in search_results:
             try:
-                # Get full point data
                 point_data = vector_db.get_point_by_id("found_persons", result['id'])
                 if point_data:
-                    match_result = format_search_result(point_data, confidence_scoring)
-                    matches.append(match_result)
+                    found_person_data = point_data
+                    break
             except Exception as e:
-                logger.error(f"Failed to process search result {result['id']}: {str(e)}")
+                logger.error(f"Failed to get point data for {result['id']}: {str(e)}")
                 continue
         
-        # If include_similar is True and we have the embedding, find similar records
-        if include_similar and matches and limit > 1:
-            try:
-                # Get the embedding of the first match from search results
-                if search_results and 'vector' in search_results[0]:
-                    embedding = np.array(search_results[0]['vector'])
-                    
-                    # Search for similar faces
-                    similar_results = vector_db.search_similar_faces(
-                        query_embedding=embedding,
-                        collection_name="found_persons",
-                        limit=limit,
-                        score_threshold=settings.similarity_threshold,
-                        filters=None  # No filters for similarity search
-                    )
-                    
-                    # Add similar results (excluding the original)
-                    for result in similar_results:
-                        if result['id'] != matches[0].id:  # Skip the original match
-                            try:
-                                point_data = vector_db.get_point_by_id("found_persons", result['id'])
-                                if point_data:
-                                    # Create a proper match result with actual similarity scores
-                                    mock_match = {
-                                        'id': result['id'],
-                                        'face_similarity': result['score'],
-                                        'metadata_similarity': 0.5,  # Default metadata similarity
-                                        'combined_score': result['score'] * 0.7 + 0.5 * 0.3,
-                                        'payload': point_data['payload'],
-                                        'match_details': {
-                                            'gender_match': 0.5,
-                                            'age_consistency': 0.5,
-                                            'marks_similarity': 0.5,
-                                            'location_plausibility': 0.5
-                                        }
-                                    }
-                                    
-                                    # Calculate confidence
-                                    confidence_level, confidence_score, explanation = confidence_scoring.calculate_confidence(mock_match)
-                                    
-                                    # Format confidence factors
-                                    factors = {}
-                                    for factor_name, factor_data in explanation.get('factors', {}).items():
-                                        factors[factor_name] = ConfidenceFactor(
-                                            score=factor_data['score'],
-                                            weight=factor_data['weight'],
-                                            contribution=factor_data['contribution'],
-                                            description=factor_data['description']
-                                        )
-                                    
-                                    # Create confidence explanation
-                                    confidence_explanation = ConfidenceExplanation(
-                                        confidence_level=confidence_level.value,
-                                        confidence_score=confidence_score,
-                                        factors=factors,
-                                        reasons=explanation.get('reasons', []),
-                                        summary=explanation.get('summary', ''),
-                                        recommendations=explanation.get('recommendations', []),
-                                        threshold_info=explanation.get('threshold_info', {})
-                                    )
-                                    
-                                    # Extract contact information
-                                    contact = point_data['payload'].get('finder_contact', 'No contact available')
-                                    
-                                    # Extract image_url from payload (if available)
-                                    image_url = point_data['payload'].get('image_url')
-                                    
-                                    similar_match = MatchResult(
-                                        id=result['id'],
-                                        face_similarity=result['score'],
-                                        metadata_similarity=0.5,
-                                        combined_score=mock_match['combined_score'],
-                                        confidence_level=confidence_level.value,
-                                        confidence_score=confidence_score,
-                                        explanation=confidence_explanation,
-                                        contact=contact,
-                                        metadata=point_data['payload'],
-                                        image_url=image_url
-                                    )
-                                    
-                                    matches.append(similar_match)
-                                    
-                                    if len(matches) >= limit:
-                                        break
-                                        
-                            except Exception as e:
-                                logger.error(f"Failed to process similar result {result['id']}: {str(e)}")
-                                continue
-                                
-            except Exception as e:
-                logger.error(f"Failed to find similar records: {str(e)}")
-                # Continue without similar records
+        if not found_person_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Found person with found_id '{found_id}' not found"
+            )
+        
+        # Format the found person record (just for reference, not as a match)
+        found_person_result = format_search_result(found_person_data, confidence_scoring)
+        
+        # Search for potential matches in missing_persons collection
+        matches = []
+        try:
+            # Get embedding and metadata from found person
+            if 'vector' in found_person_data and found_person_data['vector'] is not None:
+                embedding = np.array(found_person_data['vector'])
+                metadata = found_person_data['payload']
+                
+                logger.info(f"Searching for potential matches in missing_persons for found_id: {found_id}")
+                
+                # Use bilateral search to find potential matches in missing_persons
+                missing_matches = bilateral_search.search_for_missing(
+                    found_embedding=embedding,
+                    found_metadata=metadata,
+                    limit=limit
+                )
+                
+                # Format the potential matches
+                matches = format_match_results(missing_matches, confidence_scoring)
+                logger.info(f"Found {len(matches)} potential matches in missing_persons")
+                
+            else:
+                logger.warning(f"Found person {found_id} has no embedding vector, cannot search for matches")
+                
+        except Exception as e:
+            logger.error(f"Failed to search for potential matches: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            # Continue without potential matches - don't fail the search
         
         processing_time = (time.time() - start_time) * 1000
         
@@ -416,10 +318,14 @@ async def search_found_person(
             filters=None
         )
         
+        # Return the found person record + potential matches from missing_persons
+        # matches now only contains potential matches from missing_persons collection
         return SearchResponse(
             success=True,
-            message=f"Found {len(matches)} record(s) for found_id '{found_id}'",
-            matches=matches,
+            message=f"Found found person with found_id '{found_id}' and {len(matches)} potential match(es) in missing_persons",
+            missing_person=None,  # Not applicable when searching for found
+            found_person=found_person_result,  # The found person record itself
+            matches=matches,  # Potential matches from missing_persons collection only
             total_found=len(matches),
             search_parameters=search_params,
             processing_time_ms=processing_time
@@ -435,109 +341,3 @@ async def search_found_person(
         )
 
 
-@router.get("/cases/all")
-async def list_all_cases(
-    vector_db: VectorDBDep,
-    confidence_scoring: ConfidenceScoringDep,
-    limit: int = Query(default=100, ge=1, le=500, description="Maximum number of results per collection"),
-    case_type: Optional[str] = Query(default=None, alias="type", description="Filter by type: 'missing', 'found', or None for both")
-):
-    """
-    List all missing and found person cases.
-    
-    This endpoint retrieves all cases from both collections, optionally filtered by type.
-    
-    Args:
-        limit: Maximum number of results to return per collection
-        case_type: Optional filter by type ('missing', 'found', or None for both)
-        
-    Returns:
-        Dictionary containing lists of missing and found cases
-    """
-    start_time = time.time()
-    
-    try:
-        logger.info(f"Listing all cases with limit={limit}, type={case_type}")
-        
-        all_cases = {
-            'missing': [],
-            'found': []
-        }
-        
-        # Get missing persons if case_type is None or 'missing'
-        if case_type is None or case_type == 'missing':
-            try:
-                missing_points, _ = vector_db.list_all_points(
-                    collection_name="missing_persons",
-                    limit=limit
-                )
-                
-                for point_data in missing_points:
-                    try:
-                        match_result = format_search_result(
-                            {
-                                'id': point_data['id'],
-                                'payload': point_data['payload'],
-                                'vector': None  # Not needed for listing
-                            },
-                            confidence_scoring
-                        )
-                        all_cases['missing'].append(match_result)
-                    except Exception as e:
-                        logger.error(f"Failed to format missing person {point_data['id']}: {str(e)}")
-                        continue
-            except Exception as e:
-                logger.error(f"Failed to list missing persons: {str(e)}")
-                # Continue with found persons even if missing fails
-        
-        # Get found persons if case_type is None or 'found'
-        if case_type is None or case_type == 'found':
-            try:
-                found_points, _ = vector_db.list_all_points(
-                    collection_name="found_persons",
-                    limit=limit
-                )
-                
-                for point_data in found_points:
-                    try:
-                        match_result = format_search_result(
-                            {
-                                'id': point_data['id'],
-                                'payload': point_data['payload'],
-                                'vector': None  # Not needed for listing
-                            },
-                            confidence_scoring
-                        )
-                        all_cases['found'].append(match_result)
-                    except Exception as e:
-                        logger.error(f"Failed to format found person {point_data['id']}: {str(e)}")
-                        continue
-            except Exception as e:
-                logger.error(f"Failed to list found persons: {str(e)}")
-                # Continue even if found fails
-        
-        processing_time = (time.time() - start_time) * 1000
-        
-        # Calculate statistics
-        total_missing = len(all_cases['missing'])
-        total_found = len(all_cases['found'])
-        total_cases = total_missing + total_found
-        
-        return {
-            'success': True,
-            'message': f'Retrieved {total_cases} cases ({total_missing} missing, {total_found} found)',
-            'cases': all_cases,
-            'statistics': {
-                'total_missing': total_missing,
-                'total_found': total_found,
-                'total_cases': total_cases
-            },
-            'processing_time_ms': processing_time
-        }
-        
-    except Exception as e:
-        logger.error(f"List all cases failed: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}"
-        )
