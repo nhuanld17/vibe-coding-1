@@ -347,6 +347,13 @@ class BilateralSearchService:
             
             overall_similarity = weighted_sum / total_weight if total_weight > 0 else 0.0
             
+            # Apply HEAVY penalty if gender doesn't match (reduce score by 60%)
+            # Gender mismatch is a critical indicator - should severely penalize the match
+            if gender_sim == 0.0:
+                original_sim = overall_similarity
+                overall_similarity = overall_similarity * 0.4  # Reduce by 60%
+                logger.debug(f"Gender mismatch HEAVY penalty applied: metadata_similarity reduced from {original_sim:.3f} to {overall_similarity:.3f}")
+            
             return min(1.0, max(0.0, overall_similarity))
             
         except Exception as e:
@@ -486,8 +493,8 @@ class BilateralSearchService:
         Validate a match to reject suspicious false positives.
         
         Rejects matches when:
-        1. Face similarity > 0.92 but metadata_similarity < 0.35 (suspicious false positive)
-        2. Face similarity > 0.90 but gender mismatch and metadata_similarity < 0.4
+        1. Gender mismatch with face similarity > 0.85 (STRICT - reject immediately)
+        2. Face similarity > 0.92 but metadata_similarity < 0.35 (suspicious false positive)
         3. Face similarity > 0.90 but age_plausibility < 0.1 (very unlikely age progression)
         4. Face similarity > 0.88 but age_plausibility < 0.05 and metadata_similarity < 0.4
         
@@ -504,20 +511,22 @@ class BilateralSearchService:
             gender_match = match_details.get('gender_match', 1.0)
             age_consistency = match_details.get('age_consistency', 1.0)
             
+            # STRICT REJECTION: Gender mismatch with high face similarity (>0.85)
+            # Gender is a critical distinguishing factor - different genders should NOT match
+            # Even if faces look similar, gender mismatch is a strong indicator of false positive
+            if gender_match == 0.0 and face_sim > 0.85:
+                logger.warning(
+                    f"STRICT REJECTION: Gender mismatch detected with high face similarity. "
+                    f"face_sim={face_sim:.3f} - This is likely a false positive. Rejecting match."
+                )
+                return False
+            
             # Reject: High face similarity (>0.92) but very low metadata similarity (<0.35)
             # This is a strong indicator of false positive (e.g., 2 different people with similar faces)
             if face_sim > 0.92 and metadata_sim < 0.35:
                 logger.warning(
                     f"Rejecting suspicious match: face_sim={face_sim:.3f} but metadata_sim={metadata_sim:.3f} "
                     f"(likely false positive)"
-                )
-                return False
-            
-            # Reject: High face similarity (>0.90) with gender mismatch and low metadata similarity
-            # Gender is a strong distinguishing factor
-            if face_sim > 0.90 and gender_match == 0.0 and metadata_sim < 0.4:
-                logger.warning(
-                    f"Rejecting match: face_sim={face_sim:.3f} but gender mismatch and metadata_sim={metadata_sim:.3f}"
                 )
                 return False
             

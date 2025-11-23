@@ -110,6 +110,10 @@ class ConfidenceScoringService:
             # Extract factors from match result
             factors = self._extract_confidence_factors(match_result)
             
+            # Check for gender mismatch (get from match_details)
+            match_details = match_result.get('match_details', {})
+            gender_match = match_details.get('gender_match', 1.0)
+            
             # Calculate weighted confidence score
             confidence_score = (
                 self.face_weight * factors.face_similarity +
@@ -118,6 +122,13 @@ class ConfidenceScoringService:
                 self.location_weight * factors.location_proximity +
                 self.features_weight * factors.distinctive_features
             )
+            
+            # Apply VERY HEAVY penalty if gender doesn't match (reduce confidence score by 50%)
+            # Gender mismatch is a critical factor - different genders should not match
+            if gender_match == 0.0:
+                original_score = confidence_score
+                confidence_score = confidence_score * 0.5  # Reduce by 50%
+                logger.debug(f"Gender mismatch VERY HEAVY penalty applied: confidence_score reduced from {original_score:.3f} to {confidence_score:.3f}")
             
             # Ensure score is in valid range
             confidence_score = max(0.0, min(1.0, confidence_score))
