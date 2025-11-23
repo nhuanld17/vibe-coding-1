@@ -8,8 +8,15 @@ file uploads, and data integrity checks.
 import re
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
-import magic
 from loguru import logger
+
+# Try to import magic (optional - may not be available on Windows)
+try:
+    import magic
+    MAGIC_AVAILABLE = True
+except ImportError:
+    MAGIC_AVAILABLE = False
+    logger.warning("python-magic not available. File type validation will use filename extension fallback.")
 
 
 # Supported image MIME types
@@ -52,12 +59,26 @@ def validate_file_upload(file_bytes: bytes, filename: str) -> Tuple[bool, str]:
             return False, f"File too large (maximum {MAX_FILE_SIZE // (1024*1024)}MB)"
         
         # Check MIME type
-        try:
-            mime_type = magic.from_buffer(file_bytes, mime=True)
-        except Exception:
-            # Fallback to filename extension
+        if MAGIC_AVAILABLE:
+            try:
+                mime_type = magic.from_buffer(file_bytes, mime=True)
+            except Exception:
+                # Fallback to filename extension
+                ext = filename.lower().split('.')[-1] if '.' in filename else ''
+                mime_type = f"image/{ext}" if ext in ['jpg', 'jpeg', 'png', 'gif', 'webp'] else 'unknown'
+        else:
+            # Fallback to filename extension when magic is not available
             ext = filename.lower().split('.')[-1] if '.' in filename else ''
-            mime_type = f"image/{ext}" if ext in ['jpg', 'jpeg', 'png', 'gif', 'webp'] else 'unknown'
+            if ext in ['jpg', 'jpeg']:
+                mime_type = 'image/jpeg'
+            elif ext == 'png':
+                mime_type = 'image/png'
+            elif ext == 'gif':
+                mime_type = 'image/gif'
+            elif ext == 'webp':
+                mime_type = 'image/webp'
+            else:
+                mime_type = 'unknown'
         
         if mime_type not in SUPPORTED_IMAGE_TYPES:
             return False, f"Unsupported file type: {mime_type}"

@@ -122,60 +122,135 @@ class FaceDetector:
         output_size: Tuple[int, int] = (112, 112)
     ) -> np.ndarray:
         """
-        Align face using eye positions and resize to standard size.
+        Align face using 5-point similarity transformation (standard ArcFace alignment).
+        
+        Uses all 5 landmarks: left_eye, right_eye, nose, mouth_left, mouth_right
+        This is the correct alignment method for ArcFace models.
+        
+        Landmark order (from MTCNN detect_faces):
+        - landmarks[0] = left_eye
+        - landmarks[1] = right_eye
+        - landmarks[2] = nose
+        - landmarks[3] = mouth_left
+        - landmarks[4] = mouth_right
         
         Args:
             image: Input image as numpy array (BGR format)
-            landmarks: Facial landmarks array of shape (5, 2)
+            landmarks: Facial landmarks array of shape (5, 2) in order:
+                      [left_eye, right_eye, nose, mouth_left, mouth_right]
             output_size: Output image size (width, height)
             
         Returns:
-            Aligned face image as numpy array
+            Aligned face image as numpy array (BGR format, 112x112)
             
         Raises:
             ValueError: If landmarks are invalid
             RuntimeError: If alignment fails
         """
         if landmarks.shape != (5, 2):
-            raise ValueError("Landmarks must be array of shape (5, 2)")
+            raise ValueError(f"Landmarks must be array of shape (5, 2), got {landmarks.shape}")
         
         try:
-            # Get eye positions (first two landmarks)
-            left_eye = landmarks[0]
-            right_eye = landmarks[1]
+            # Source landmarks from MTCNN (input)
+            # Order: [left_eye, right_eye, nose, mouth_left, mouth_right]
+            src_landmarks = landmarks.astype(np.float32)
             
-            # Calculate angle between eyes
-            eye_center = ((left_eye[0] + right_eye[0]) / 2, (left_eye[1] + right_eye[1]) / 2)
-            dy = right_eye[1] - left_eye[1]
-            dx = right_eye[0] - left_eye[0]
-            angle = np.degrees(np.arctan2(dy, dx))
+            # Target landmarks for 112x112 output (standard ArcFace reference positions)
+            # These positions are standardized for ArcFace model training
+            # Order must match src_landmarks: [left_eye, right_eye, nose, mouth_left, mouth_right]
+            dst_landmarks = np.array([
+                [38.2946, 51.6963],  # left eye
+                [73.5318, 51.5014],  # right eye
+                [56.0252, 71.7366],  # nose tip
+                [41.5493, 92.3655],  # left mouth corner
+                [70.7299, 92.2041]  # right mouth corner
+            ], dtype=np.float32)
             
-            # Calculate scale to fit desired eye distance
-            eye_distance = np.sqrt((dx ** 2) + (dy ** 2))
-            desired_eye_distance = output_size[0] * 0.35  # 35% of face width
-            scale = desired_eye_distance / eye_distance
-            
-            # Get rotation matrix
-            M = cv2.getRotationMatrix2D(eye_center, angle, scale)
-            
-            # Adjust translation to center the face
-            tx = output_size[0] * 0.5
-            ty = output_size[1] * 0.35  # Eyes at 35% from top
-            M[0, 2] += (tx - eye_center[0])
-            M[1, 2] += (ty - eye_center[1])
+            # Use OpenCV's estimateAffinePartial2D for similarity transformation
+            # This computes the best-fit similarity transform (rotation + scale + translation)
+            # using least squares on all 5 points
+            # Returns: 2x3 transformation matrix
+            try:
+                # estimateAffinePartial2D is available in OpenCV 4.5+
+                # It computes similarity transform (4 DOF: rotation, scale, tx, ty)
+                M, inliers = cv2.estimateAffinePartial2D(
+                    src_landmarks,
+                    dst_landmarks,
+                    method=cv2.RANSAC,
+                    ransacReprojThreshold=3.0,
+                    maxIters=2000,
+                    confidence=0.99
+                )
+                
+                if M is None:
+                    # Fallback to custom SVD-based method if estimateAffinePartial2D fails
+                    logger.warning("estimateAffinePartial2D failed, using SVD fallback")
+                    M = self._compute_similarity_transform_svd(src_landmarks, dst_landmarks)
+                    
+            except AttributeError:
+                # OpenCV version < 4.5, use SVD fallback
+                logger.warning("estimateAffinePartial2D not available, using SVD fallback")
+                M = self._compute_similarity_transform_svd(src_landmarks, dst_landmarks)
             
             # Apply transformation
             aligned_face = cv2.warpAffine(
-                image, M, output_size, 
+                image, M, output_size,
                 flags=cv2.INTER_CUBIC,
-                borderMode=cv2.BORDER_REFLECT
+                borderMode=cv2.BORDER_CONSTANT,
+                borderValue=0
             )
             
             return aligned_face
             
         except Exception as e:
             logger.error(f"Face alignment failed: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             raise RuntimeError(f"Face alignment failed: {str(e)}")
+    
+    def _compute_similarity_transform_svd(
+        self,
+        src_landmarks: np.ndarray,
+        dst_landmarks: np.ndarray
+    ) -> np.ndarray:
+        """
+        Compute similarity transformation matrix using SVD (fallback method).
+        
+        Args:
+            src_landmarks: Source landmarks (5, 2)
+            dst_landmarks: Destination landmarks (5, 2)
+            
+        Returns:
+            2x3 transformation matrix
+        """
+        # Center landmarks
+        src_center = src_landmarks.mean(axis=0)
+        dst_center = dst_landmarks.mean(axis=0)
+        
+        src_centered = src_landmarks - src_center
+        dst_centered = dst_landmarks - dst_center
+        
+        # Compute scale
+        src_scale = np.sqrt((src_centered ** 2).sum(axis=1).mean())
+        dst_scale = np.sqrt((dst_centered ** 2).sum(axis=1).mean())
+        scale = dst_scale / (src_scale + 1e-8)
+        
+        # Compute rotation using SVD
+        H = src_centered.T @ dst_centered
+        U, S, Vt = np.linalg.svd(H)
+        R = Vt.T @ U.T
+        
+        # Ensure proper rotation (no reflection)
+        if np.linalg.det(R) < 0:
+            Vt[-1, :] *= -1
+            R = Vt.T @ U.T
+        
+        # Build transformation matrix
+        M = np.zeros((2, 3), dtype=np.float32)
+        M[:2, :2] = scale * R
+        M[:, 2] = dst_center - scale * R @ src_center
+        
+        return M
     
     def extract_largest_face(
         self, 

@@ -35,9 +35,17 @@ class Settings(BaseSettings):
     postgres_db: str = Field(default="missing_person_db", description="PostgreSQL database")
     
     # Model Configuration
+    embedding_backend: str = Field(
+        default="insightface",
+        description="Embedding backend type: 'insightface' (recommended) or 'onnx' (deprecated)"
+    )
     arcface_model_path: str = Field(
         default="./models/weights/arcface_r100_v1.onnx",
-        description="Path to ArcFace ONNX model"
+        description="Path to ArcFace ONNX model (only used for 'onnx' backend)"
+    )
+    insightface_model_name: str = Field(
+        default="antelopev2",
+        description="InsightFace model name (only used for 'insightface' backend)"
     )
     use_gpu: bool = Field(default=False, description="Use GPU for inference")
     
@@ -49,16 +57,55 @@ class Settings(BaseSettings):
         description="Minimum confidence for face detection"
     )
     similarity_threshold: float = Field(
-        default=0.80,
+        default=0.45,
         ge=0.0,
         le=1.0,
-        description="Minimum similarity for face matching (increased to reduce false positives)"
+        description="Minimum similarity for face matching. Adjusted for InsightFace backend with age-progression datasets where same-person similarity can be 0.4-0.6."
     )
     top_k_matches: int = Field(
         default=10,
         ge=1,
         le=100,
         description="Maximum number of matches to return"
+    )
+    
+    # Bilateral Search Thresholds
+    # Note: Thresholds adjusted for InsightFace backend with age-progression datasets
+    # Same-person similarity can be lower (0.4-0.6) for large age gaps
+    initial_search_threshold: float = Field(
+        default=0.40,
+        ge=0.0,
+        le=1.0,
+        description="Initial Qdrant search threshold for face similarity (cosine similarity). Lowered for age-progression data."
+    )
+    face_similarity_threshold: float = Field(
+        default=0.45,
+        ge=0.0,
+        le=1.0,
+        description="Minimum face similarity threshold for final filtering. Lowered to account for age-progression variations."
+    )
+    combined_score_threshold: float = Field(
+        default=0.40,
+        ge=0.0,
+        le=1.0,
+        description="Minimum combined score (face + metadata) threshold"
+    )
+    face_metadata_fallback_threshold: float = Field(
+        default=0.35,
+        ge=0.0,
+        le=1.0,
+        description="Minimum face similarity when metadata similarity is high (>=0.60). Allows matches with good metadata even if face similarity is lower."
+    )
+    
+    # Face Search Threshold (for missing-person search)
+    # This is the primary threshold used for filtering search results
+    # Should be set based on eval_threshold_sweep.py results
+    # Recommended: Use the "RECOMMENDED SEARCH THRESHOLD" from threshold sweep evaluation
+    face_search_threshold: float = Field(
+        default=0.30,
+        ge=0.0,
+        le=1.0,
+        description="Primary face similarity threshold for missing-person search. This threshold determines which candidates are considered 'reasonable matches' and returned to the user for human review. Should be set based on eval_threshold_sweep.py results. For missing-person use case (high recall needed), typically 0.25-0.35. Can be overridden via FACE_SEARCH_THRESHOLD environment variable."
     )
     
     # MinIO Configuration (for future use)

@@ -11,7 +11,11 @@ from loguru import logger
 
 from .config import Settings, get_settings
 from models.face_detection import FaceDetector
-from models.face_embedding import FaceEmbeddingExtractor
+from models.face_embedding import (
+    FaceEmbeddingExtractor,  # Backward compatibility
+    create_embedding_backend,
+    BaseFaceEmbedder
+)
 from services.vector_db import VectorDatabaseService
 from services.bilateral_search import BilateralSearchService
 from services.confidence_scoring import ConfidenceScoringService
@@ -20,7 +24,7 @@ from services.cloudinary_service import configure_cloudinary
 
 # Global service instances (initialized on startup)
 _face_detector: FaceDetector = None
-_embedding_extractor: FaceEmbeddingExtractor = None
+_embedding_extractor: BaseFaceEmbedder = None  # Use base class for type hint
 _vector_db: VectorDatabaseService = None
 _bilateral_search: BilateralSearchService = None
 _confidence_scoring: ConfidenceScoringService = None
@@ -57,14 +61,51 @@ def initialize_services(settings: Settings) -> None:
         
         # Initialize Face Embedding Extractor
         logger.info("Initializing face embedding extractor...")
-        if not settings.validate_model_path():
-            raise RuntimeError(f"ArcFace model not found at {settings.arcface_model_path}")
+        logger.info(f"Using embedding backend: {settings.embedding_backend}")
         
-        _embedding_extractor = FaceEmbeddingExtractor(
-            model_path=settings.arcface_model_path,
-            use_gpu=settings.use_gpu
-        )
-        logger.info("Face embedding extractor initialized successfully")
+        try:
+            if settings.embedding_backend.lower() == "insightface":
+                # Use InsightFace backend (recommended)
+                _embedding_extractor = create_embedding_backend(
+                    backend_type="insightface",
+                    use_gpu=settings.use_gpu,
+                    model_name=settings.insightface_model_name
+                )
+                logger.info("InsightFace embedding backend initialized successfully")
+                
+            elif settings.embedding_backend.lower() == "onnx":
+                # Use ONNX backend (deprecated)
+                if not settings.validate_model_path():
+                    raise RuntimeError(f"ArcFace model not found at {settings.arcface_model_path}")
+                
+                _embedding_extractor = create_embedding_backend(
+                    backend_type="onnx",
+                    model_path=settings.arcface_model_path,
+                    use_gpu=settings.use_gpu,
+                    deprecated=True
+                )
+                logger.warning("ONNX embedding backend initialized (DEPRECATED - may produce incorrect embeddings)")
+                
+            else:
+                raise ValueError(
+                    f"Unknown embedding backend: {settings.embedding_backend}. "
+                    f"Supported: 'insightface', 'onnx'"
+                )
+                
+        except ImportError as e:
+            if "insightface" in str(e).lower():
+                logger.error(
+                    "InsightFace library is not installed. "
+                    "Please install it with: pip install insightface"
+                )
+                raise RuntimeError(
+                    "InsightFace library is required but not installed. "
+                    "Install with: pip install insightface"
+                )
+            raise
+        except Exception as e:
+            logger.error(f"Failed to initialize embedding backend: {str(e)}")
+            raise RuntimeError(f"Embedding backend initialization failed: {str(e)}")
         
         # Initialize Vector Database
         logger.info("Initializing vector database...")
@@ -81,10 +122,14 @@ def initialize_services(settings: Settings) -> None:
         
         # Initialize Bilateral Search Service
         logger.info("Initializing bilateral search service...")
+        logger.info(f"Using face_search_threshold={settings.face_search_threshold} for missing-person search")
         _bilateral_search = BilateralSearchService(
             vector_db=_vector_db,
-            face_threshold=settings.similarity_threshold,
-            metadata_weight=0.3
+            face_threshold=settings.face_search_threshold,  # Use face_search_threshold as primary threshold
+            metadata_weight=0.3,
+            initial_search_threshold=settings.initial_search_threshold,
+            combined_score_threshold=settings.combined_score_threshold,
+            face_metadata_fallback_threshold=settings.face_metadata_fallback_threshold
         )
         logger.info("Bilateral search service initialized successfully")
         
@@ -136,12 +181,12 @@ def get_face_detector() -> FaceDetector:
     return _face_detector
 
 
-def get_embedding_extractor() -> FaceEmbeddingExtractor:
+def get_embedding_extractor() -> BaseFaceEmbedder:
     """
     Get face embedding extractor dependency.
     
     Returns:
-        FaceEmbeddingExtractor instance
+        BaseFaceEmbedder instance (InsightFaceEmbedder or OnnxArcFaceEmbedder)
         
     Raises:
         HTTPException: If service not initialized
@@ -241,7 +286,7 @@ def check_services_health() -> dict:
 # Type aliases for dependency injection
 SettingsDep = Annotated[Settings, Depends(get_cached_settings)]
 FaceDetectorDep = Annotated[FaceDetector, Depends(get_face_detector)]
-EmbeddingExtractorDep = Annotated[FaceEmbeddingExtractor, Depends(get_embedding_extractor)]
+EmbeddingExtractorDep = Annotated[BaseFaceEmbedder, Depends(get_embedding_extractor)]
 VectorDBDep = Annotated[VectorDatabaseService, Depends(get_vector_db)]
 BilateralSearchDep = Annotated[BilateralSearchService, Depends(get_bilateral_search)]
 ConfidenceScoringDep = Annotated[ConfidenceScoringService, Depends(get_confidence_scoring)]

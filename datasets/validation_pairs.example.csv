@@ -1,0 +1,12 @@
+person_id_1,image_path_1,person_id_2,image_path_2,label
+person_001,datasets/FGNET_organized/person_001/age_02.jpg,person_001,datasets/FGNET_organized/person_001/age_33.jpg,1
+person_001,datasets/FGNET_organized/person_001/age_05.jpg,person_001,datasets/FGNET_organized/person_001/age_28.jpg,1
+person_001,datasets/FGNET_organized/person_001/age_14.jpg,person_001,datasets/FGNET_organized/person_001/age_40.jpg,1
+person_002,datasets/FGNET_organized/person_002/age_03.jpg,person_002,datasets/FGNET_organized/person_002/age_31.jpg,1
+person_002,datasets/FGNET_organized/person_002/age_15.jpg,person_002,datasets/FGNET_organized/person_002/age_38.jpg,1
+person_003,datasets/FGNET_organized/person_003/age_18.jpg,person_003,datasets/FGNET_organized/person_003/age_61.jpg,1
+person_001,datasets/FGNET_organized/person_001/age_02.jpg,person_002,datasets/FGNET_organized/person_002/age_03.jpg,0
+person_001,datasets/FGNET_organized/person_001/age_14.jpg,person_002,datasets/FGNET_organized/person_002/age_15.jpg,0
+person_001,datasets/FGNET_organized/person_001/age_33.jpg,person_003,datasets/FGNET_organized/person_003/age_35.jpg,0
+person_002,datasets/FGNET_organized/person_002/age_23.jpg,person_003,datasets/FGNET_organized/person_003/age_25.jpg,0
+

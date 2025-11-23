@@ -86,15 +86,38 @@ def process_image_and_extract_face(
 
 def format_match_results(
     matches: List[dict],
-    confidence_scoring
+    confidence_scoring,
+    min_confidence_threshold: float = 0.50  # Minimum confidence score to show (reject VERY_LOW and LOW matches)
 ) -> List[MatchResult]:
-    """Format match results with confidence scoring."""
+    """
+    Format match results with confidence scoring.
+    
+    Args:
+        matches: List of match dictionaries from bilateral search
+        confidence_scoring: Confidence scoring service
+        min_confidence_threshold: Minimum confidence score to include (default 0.40 = reject VERY_LOW)
+    
+    Returns:
+        List of formatted match results (only matches with confidence >= min_confidence_threshold)
+    """
     formatted_matches = []
+    rejected_count = 0
     
     for match in matches:
         try:
             # Calculate confidence
             confidence_level, confidence_score, explanation = confidence_scoring.calculate_confidence(match)
+            
+            # STRICT FILTER: Reject matches with confidence score below threshold
+            # This prevents showing very low confidence matches (like 27.4%) to users
+            if confidence_score < min_confidence_threshold:
+                rejected_count += 1
+                logger.debug(
+                    f"Rejecting match {match.get('id', 'unknown')} with low confidence: "
+                    f"confidence_score={confidence_score:.3f} < threshold={min_confidence_threshold:.3f} "
+                    f"(level={confidence_level.value})"
+                )
+                continue
             
             # Format confidence factors
             factors = {}
@@ -143,6 +166,9 @@ def format_match_results(
         except Exception as e:
             logger.error(f"Failed to format match result: {str(e)}")
             continue
+    
+    if rejected_count > 0:
+        logger.info(f"Filtered out {rejected_count} matches with confidence < {min_confidence_threshold:.2f}")
     
     return formatted_matches
 

@@ -52,7 +52,8 @@ async def lifespan(app: FastAPI):
         logger.info(f"Qdrant: {settings.qdrant_host}:{settings.qdrant_port}")
         logger.info(f"Model path: {settings.arcface_model_path}")
         logger.info(f"GPU enabled: {settings.use_gpu}")
-        logger.info(f"Face threshold: {settings.face_confidence_threshold}")
+        logger.info(f"Face confidence threshold: {settings.face_confidence_threshold}")
+        logger.info(f"Face search threshold: {settings.face_search_threshold}")
         logger.info(f"Similarity threshold: {settings.similarity_threshold}")
         
         logger.info("API startup completed successfully")

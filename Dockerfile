@@ -2,9 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies (including build tools for insightface)
 RUN apt-get update && apt-get install -y \
     curl \
+    build-essential \
+    g++ \
+    gcc \
     libglib2.0-0 \
     libsm6 \
     libxext6 \

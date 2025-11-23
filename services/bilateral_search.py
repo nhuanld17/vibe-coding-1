@@ -30,24 +30,35 @@ class BilateralSearchService:
         vector_db: VectorDatabaseService,
         face_threshold: float = 0.65,
         metadata_weight: float = 0.3,
-        age_tolerance: int = 5
+        age_tolerance: int = 5,
+        initial_search_threshold: float = 0.60,
+        combined_score_threshold: float = 0.55,
+        face_metadata_fallback_threshold: float = 0.50
     ) -> None:
         """
         Initialize the bilateral search service.
         
         Args:
             vector_db: Vector database service instance
-            face_threshold: Minimum face similarity threshold (0-1)
+            face_threshold: Minimum face similarity threshold for final filtering (0-1)
             metadata_weight: Weight for metadata similarity in final score (0-1)
             age_tolerance: Age tolerance in years for matching
+            initial_search_threshold: Initial Qdrant search threshold (0-1)
+            combined_score_threshold: Minimum combined score threshold (0-1)
+            face_metadata_fallback_threshold: Minimum face similarity when metadata is high (0-1)
         """
         self.vector_db = vector_db
         self.face_threshold = face_threshold
         self.metadata_weight = metadata_weight
         self.face_weight = 1.0 - metadata_weight
         self.age_tolerance = age_tolerance
+        self.initial_search_threshold = initial_search_threshold
+        self.combined_score_threshold = combined_score_threshold
+        self.face_metadata_fallback_threshold = face_metadata_fallback_threshold
         
         logger.info(f"Bilateral search initialized with face_threshold={face_threshold}, "
+                   f"initial_search_threshold={initial_search_threshold}, "
+                   f"combined_score_threshold={combined_score_threshold}, "
                    f"metadata_weight={metadata_weight}")
     
     def search_for_missing(
@@ -80,12 +91,12 @@ class BilateralSearchService:
             filters = self._extract_search_filters(found_metadata, 'missing')
             
             # Search in missing persons collection
-            # Use lower threshold for initial search, filters will be applied in reranking
+            # Use configurable threshold for initial search, filters will be applied in reranking
             vector_matches = self.vector_db.search_similar_faces(
                 query_embedding=found_embedding,
                 collection_name="missing_persons",
                 limit=limit * 5,  # Get more results for reranking
-                score_threshold=0.45,  # Very low threshold for initial search to catch all potential matches
+                score_threshold=self.initial_search_threshold,  # Configurable initial search threshold
                 filters=None  # Don't apply filters in vector search, apply in reranking
             )
             
@@ -98,16 +109,21 @@ class BilateralSearchService:
             
             # Filter by minimum combined score or face similarity (more lenient)
             # Accept matches with good face similarity OR good combined score OR decent face similarity with good metadata
-            filtered_matches = [
-                m for m in reranked_matches 
-                if (m['face_similarity'] >= self.face_threshold) or 
-                   (m['combined_score'] >= 0.55) or
-                   (m['face_similarity'] >= 0.50 and m['metadata_similarity'] >= 0.60)
-            ]
+            # BUT reject suspicious false positives (high face similarity but very low metadata similarity)
+            # NOTE: This is a human-in-the-loop system - we return ranked candidates for review, not hard yes/no decisions
+            filtered_matches = []
+            for m in reranked_matches:
+                # Validate match first (rejects suspicious false positives, especially for children)
+                if self._validate_match(m):
+                    if ((m['face_similarity'] >= self.face_threshold) or 
+                        (m['combined_score'] >= self.combined_score_threshold) or
+                        (m['face_similarity'] >= self.face_metadata_fallback_threshold and m['metadata_similarity'] >= 0.60)):
+                        filtered_matches.append(m)
             
             logger.info(f"After filtering: {len(filtered_matches)} matches (from {len(reranked_matches)} reranked)")
             
-            # Limit results
+            # Limit results to top-k for human review
+            # This is intentionally NOT a hard yes/no decision - all candidates need human verification
             final_matches = filtered_matches[:limit]
             
             logger.info(f"Found {len(final_matches)} potential missing person matches")
@@ -148,12 +164,12 @@ class BilateralSearchService:
             filters = self._extract_search_filters(missing_metadata, 'found')
             
             # Search in found persons collection
-            # Use lower threshold for initial search, filters will be applied in reranking
+            # Use configurable threshold for initial search, filters will be applied in reranking
             vector_matches = self.vector_db.search_similar_faces(
                 query_embedding=missing_embedding,
                 collection_name="found_persons",
                 limit=limit * 5,  # Get more results for reranking
-                score_threshold=0.45,  # Very low threshold for initial search to catch all potential matches
+                score_threshold=self.initial_search_threshold,  # Configurable initial search threshold
                 filters=None  # Don't apply filters in vector search, apply in reranking
             )
             
@@ -167,17 +183,19 @@ class BilateralSearchService:
             # Filter by minimum combined score or face similarity (more lenient)
             # Accept matches with good face similarity OR good combined score OR decent face similarity with good metadata
             # BUT reject suspicious false positives (high face similarity but very low metadata similarity)
+            # NOTE: This is a human-in-the-loop system - we return ranked candidates for review, not hard yes/no decisions
             filtered_matches = []
             for m in reranked_matches:
                 if self._validate_match(m):
                     if (m['face_similarity'] >= self.face_threshold) or \
-                       (m['combined_score'] >= 0.55) or \
-                       (m['face_similarity'] >= 0.50 and m['metadata_similarity'] >= 0.60):
+                       (m['combined_score'] >= self.combined_score_threshold) or \
+                       (m['face_similarity'] >= self.face_metadata_fallback_threshold and m['metadata_similarity'] >= 0.60):
                         filtered_matches.append(m)
             
             logger.info(f"After filtering: {len(filtered_matches)} matches (from {len(reranked_matches)} reranked)")
             
-            # Limit results
+            # Limit results to top-k for human review
+            # This is intentionally NOT a hard yes/no decision - all candidates need human verification
             final_matches = filtered_matches[:limit]
             
             logger.info(f"Found {len(final_matches)} potential found person matches")
@@ -497,6 +515,7 @@ class BilateralSearchService:
         2. Face similarity > 0.92 but metadata_similarity < 0.35 (suspicious false positive)
         3. Face similarity > 0.90 but age_plausibility < 0.1 (very unlikely age progression)
         4. Face similarity > 0.88 but age_plausibility < 0.05 and metadata_similarity < 0.4
+        5. VERY HIGH face similarity (>0.95) for children without strong metadata support (STRICT for children)
         
         Args:
             match: Match dictionary with face_similarity, metadata_similarity, and match_details
@@ -511,6 +530,28 @@ class BilateralSearchService:
             gender_match = match_details.get('gender_match', 1.0)
             age_consistency = match_details.get('age_consistency', 1.0)
             
+            # Check if both are children (age < 10)
+            # Note: match['payload'] contains the matched person's metadata
+            match_metadata = match.get('payload', {})
+            
+            # Try to get ages from match metadata
+            match_age = match_metadata.get('age_at_disappearance') or match_metadata.get('current_age_estimate')
+            
+            # For children detection, check if the matched person is a child
+            # Also check query age from match_details if available
+            both_children = False
+            if match_age is not None and match_age < 10:
+                # If matched person is a child, check query age from match_details
+                query_age_info = match_details.get('query_current_age') or match_details.get('query_age_at_disappearance')
+                if query_age_info is not None and query_age_info < 10:
+                    both_children = True
+                # If we can't determine query age but match is a child, be conservative
+                # This helps prevent false positives for children (who have less distinctive faces)
+                elif query_age_info is None:
+                    both_children = True  # Conservative: assume both children if match is child
+            
+            both_children = (query_age is not None and query_age < 10) and (match_age is not None and match_age < 10)
+            
             # STRICT REJECTION: Gender mismatch with high face similarity (>0.85)
             # Gender is a critical distinguishing factor - different genders should NOT match
             # Even if faces look similar, gender mismatch is a strong indicator of false positive
@@ -520,6 +561,41 @@ class BilateralSearchService:
                     f"face_sim={face_sim:.3f} - This is likely a false positive. Rejecting match."
                 )
                 return False
+            
+            # STRICT REJECTION FOR CHILDREN: Very high face similarity (>0.95) for children
+            # Children's faces are less distinctive and models can produce false positives
+            # Require VERY STRONG metadata support (metadata_sim > 0.7) for very high face similarity
+            if both_children and face_sim > 0.95:
+                if metadata_sim < 0.7:
+                    logger.warning(
+                        f"STRICT REJECTION FOR CHILDREN: Very high face similarity ({face_sim:.3f}) "
+                        f"for children but weak metadata support (metadata_sim={metadata_sim:.3f}). "
+                        f"Children's faces are less distinctive - requiring VERY STRONG metadata confirmation (>0.7). Rejecting match."
+                    )
+                    return False
+            
+            # STRICT REJECTION FOR CHILDREN: High face similarity (>0.90) for children without good metadata
+            # Children's faces can be confused more easily - need better metadata support
+            # For >0.90 similarity, require at least 0.6 metadata similarity
+            if both_children and face_sim > 0.90:
+                if metadata_sim < 0.6:
+                    logger.warning(
+                        f"STRICT REJECTION FOR CHILDREN: High face similarity ({face_sim:.3f}) "
+                        f"for children but insufficient metadata support (metadata_sim={metadata_sim:.3f}, required >=0.6). "
+                        f"Rejecting match to avoid false positives."
+                    )
+                    return False
+            
+            # ADDITIONAL STRICT REJECTION FOR CHILDREN: Extremely high similarity (>0.98) 
+            # For children, even 98%+ similarity can be false positive - require EXCELLENT metadata (>0.75)
+            if both_children and face_sim > 0.98:
+                if metadata_sim < 0.75:
+                    logger.warning(
+                        f"STRICT REJECTION FOR CHILDREN: Extremely high face similarity ({face_sim:.3f}) "
+                        f"for children but metadata support not excellent (metadata_sim={metadata_sim:.3f}, required >=0.75). "
+                        f"Even 98%+ similarity for children can be false positive. Rejecting match."
+                    )
+                    return False
             
             # Reject: High face similarity (>0.92) but very low metadata similarity (<0.35)
             # This is a strong indicator of false positive (e.g., 2 different people with similar faces)

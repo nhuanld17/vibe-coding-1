@@ -28,6 +28,8 @@ services:
     volumes:
       - ./models/weights:/app/models/weights:ro
       - ./logs:/app/logs
+      # Mount InsightFace models from host (if available) or let container download
+      - insightface_models:/root/.insightface/models
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -37,3 +39,4 @@ services:
 
 volumes:
   qdrant_data:
+  insightface_models:
