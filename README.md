@@ -393,7 +393,7 @@ http://localhost:8000
   "name": "John Doe",                  // Required: Full name (2-100 characters)
   "age_at_disappearance": 25,          // Required: Age when disappeared (0-120)
   "year_disappeared": 2024,            // Required: Year of disappearance (1900-2024)
-  "gender": "male",                    // Required: male/female/other/unknown
+  "gender": "male",                    // Required: male or female
   "location_last_seen": "New York, NY",// Required: Last known location (3-200 characters)
   "contact": "family@example.com",     // Required: Contact information
   "height_cm": 175,                    // Optional: Height in centimeters (50-250)

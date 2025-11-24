@@ -14,8 +14,6 @@ class GenderEnum(str, Enum):
     """Gender enumeration."""
     MALE = "male"
     FEMALE = "female"
-    OTHER = "other"
-    UNKNOWN = "unknown"
 
 
 class ConfidenceLevelEnum(str, Enum):

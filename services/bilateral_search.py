@@ -242,8 +242,8 @@ class BilateralSearchService:
         
         try:
             # Gender filter (exact match) - but don't enforce too strictly
-            # Only filter by gender if it's not 'unknown' or 'other'
-            if 'gender' in metadata and metadata['gender'] not in ['unknown', 'other', '']:
+            # Filter by gender (only 'male' or 'female' are valid now)
+            if 'gender' in metadata and metadata['gender'] in ['male', 'female']:
                 filters['gender'] = metadata['gender']
             
             # Age range filter (more flexible)

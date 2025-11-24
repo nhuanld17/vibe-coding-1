@@ -141,7 +141,7 @@ def validate_missing_person_metadata(metadata: Dict[str, Any]) -> Tuple[bool, Li
                 errors.append(f"Year disappeared must be between 1900 and {current_year}")
         
         elif field == 'gender':
-            valid_genders = {'male', 'female', 'other', 'unknown'}
+            valid_genders = {'male', 'female'}
             if metadata[field].lower() not in valid_genders:
                 errors.append(f"Gender must be one of: {', '.join(valid_genders)}")
         
@@ -209,7 +209,7 @@ def validate_found_person_metadata(metadata: Dict[str, Any]) -> Tuple[bool, List
                 errors.append("Current age estimate must be between 0 and 120")
         
         elif field == 'gender':
-            valid_genders = {'male', 'female', 'other', 'unknown'}
+            valid_genders = {'male', 'female'}
             if metadata[field].lower() not in valid_genders:
                 errors.append(f"Gender must be one of: {', '.join(valid_genders)}")
         
@@ -268,7 +268,7 @@ def validate_search_parameters(params: Dict[str, Any]) -> Tuple[bool, List[str]]
             # Validate filter values
             for key, value in params['filters'].items():
                 if key == 'gender':
-                    valid_genders = {'male', 'female', 'other', 'unknown'}
+                    valid_genders = {'male', 'female'}
                     if value not in valid_genders:
                         errors.append(f"Filter gender must be one of: {', '.join(valid_genders)}")
                 
