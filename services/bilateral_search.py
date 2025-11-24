@@ -241,10 +241,28 @@ class BilateralSearchService:
         filters = {}
         
         try:
-            # Gender filter (exact match) - but don't enforce too strictly
-            # Filter by gender (only 'male' or 'female' are valid now)
-            if 'gender' in metadata and metadata['gender'] in ['male', 'female']:
-                filters['gender'] = metadata['gender']
+            # Gender filter (exact match)
+            # Only apply filter for valid gender values ('male' or 'female')
+            # Legacy data with 'other' or 'unknown' will skip gender filtering (logged as warning)
+            if 'gender' in metadata:
+                gender = metadata['gender']
+                if gender in ['male', 'female']:
+                    filters['gender'] = gender
+                elif gender in ['other', 'unknown']:
+                    # Legacy data: log warning and skip gender filter to avoid false positives
+                    # This ensures backward compatibility but warns about potential issues
+                    logger.warning(
+                        f"Legacy gender value '{gender}' found in metadata. "
+                        f"Gender filter will be skipped. Consider migrating to 'male' or 'female'. "
+                        f"Metadata: {metadata.get('case_id') or metadata.get('found_id', 'unknown_id')}"
+                    )
+                elif gender:
+                    # Invalid gender value (not empty, but not recognized)
+                    logger.warning(
+                        f"Invalid gender value '{gender}' found in metadata. "
+                        f"Gender filter will be skipped. "
+                        f"Metadata: {metadata.get('case_id') or metadata.get('found_id', 'unknown_id')}"
+                    )
             
             # Age range filter (more flexible)
             if search_type == 'missing':
