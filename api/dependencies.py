@@ -122,10 +122,13 @@ def initialize_services(settings: Settings) -> None:
         
         # Initialize Bilateral Search Service
         logger.info("Initializing bilateral search service...")
-        logger.info(f"Using face_search_threshold={settings.face_search_threshold} for missing-person search")
+        logger.info(f"Using face_search_threshold_adult={settings.face_search_threshold_adult} for adult search")
+        logger.info(f"Using face_search_threshold_child={settings.face_search_threshold_child} for child search")
         _bilateral_search = BilateralSearchService(
             vector_db=_vector_db,
-            face_threshold=settings.face_search_threshold,  # Use face_search_threshold as primary threshold
+            face_threshold=settings.face_search_threshold_adult,  # Backward compatibility
+            face_threshold_adult=settings.face_search_threshold_adult,
+            face_threshold_child=settings.face_search_threshold_child,
             metadata_weight=0.3,
             initial_search_threshold=settings.initial_search_threshold,
             combined_score_threshold=settings.combined_score_threshold,

@@ -97,16 +97,31 @@ class Settings(BaseSettings):
         description="Minimum face similarity when metadata similarity is high (>=0.60). Allows matches with good metadata even if face similarity is lower."
     )
     
-    # Face Search Threshold (for missing-person search)
-    # This is the primary threshold used for filtering search results
-    # Should be set based on eval_threshold_sweep.py results
-    # Recommended: Use the "RECOMMENDED SEARCH THRESHOLD" from threshold sweep evaluation
-    face_search_threshold: float = Field(
+    # Face Search Thresholds (for missing-person search)
+    # Children's faces are less distinctive than adults, requiring stricter thresholds
+    # These thresholds determine which candidates are considered 'reasonable matches' and returned for human review
+    # Should be set based on eval_threshold_sweep.py (adults) and eval_threshold_sweep_children.py (children) results
+    
+    face_search_threshold_adult: float = Field(
         default=0.30,
         ge=0.0,
         le=1.0,
-        description="Primary face similarity threshold for missing-person search. This threshold determines which candidates are considered 'reasonable matches' and returned to the user for human review. Should be set based on eval_threshold_sweep.py results. For missing-person use case (high recall needed), typically 0.25-0.35. Can be overridden via FACE_SEARCH_THRESHOLD environment variable."
+        description="Face similarity threshold for ADULT missing-person search. This threshold is used when the person is classified as an adult (age >= 18 or age unknown). Should be set based on eval_threshold_sweep.py results. For missing-person use case (high recall needed), typically 0.25-0.35. Can be overridden via FACE_SEARCH_THRESHOLD_ADULT environment variable."
     )
+    
+    face_search_threshold_child: float = Field(
+        default=0.45,
+        ge=0.0,
+        le=1.0,
+        description="Face similarity threshold for CHILD missing-person search. This threshold is used when the person is classified as a child (age < 18). Children's faces are less distinctive, requiring stricter thresholds to avoid false positives. Should be set based on eval_threshold_sweep_children.py results. Typically higher than adult threshold (0.40-0.55). Can be overridden via FACE_SEARCH_THRESHOLD_CHILD environment variable."
+    )
+    
+    # Backward compatibility: keep face_search_threshold as alias for adult threshold
+    # This ensures existing code continues to work
+    @property
+    def face_search_threshold(self) -> float:
+        """Backward compatibility: returns face_search_threshold_adult."""
+        return self.face_search_threshold_adult
     
     # MinIO Configuration (for future use)
     minio_endpoint: str = Field(default="localhost:9000", description="MinIO endpoint")

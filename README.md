@@ -68,14 +68,33 @@
 
 Get the system running in **3 simple steps**:
 
-### Step 1: Download AI Model
+### Step 1: Install Dependencies
 ```bash
-python download_model.py
+pip install -r requirements.txt
 ```
 
-### Step 2: Start Docker Services
+**Note:** InsightFace models will be **automatically downloaded** on first run (~500MB).
+- Models location: `~/.insightface/models/antelopev2/` (Linux/Mac) or `C:\Users\<username>\.insightface\models\antelopev2\` (Windows)
+- **Automatic download:** Models download automatically when you first start the API
+- **Optional pre-download:** You can pre-download models using:
+  ```bash
+  python scripts/download_insightface_models.py
+  ```
+
+### Step 2: Start Services
+
+**Option A: Using Docker (Recommended)**
 ```bash
 docker-compose up -d
+```
+
+**Option B: Run Directly (for development)**
+```bash
+# Start Qdrant first
+docker-compose up -d qdrant
+
+# Then start API server
+python -m api.main
 ```
 
 ### Step 3: Verify Installation
@@ -149,11 +168,16 @@ sudo apt install python3.11 python3-pip
    cd family-finder-aI4life
    ```
 
-2. **Download AI Model**
+2. **Install Python Dependencies**
    ```bash
-   python download_model.py
+   pip install -r requirements.txt
    ```
-   This downloads the ArcFace model (~250MB) to `models/weights/`
+   
+   **Note:** InsightFace models are **automatically downloaded** when you first run the API.
+   - Models location: `~/.insightface/models/antelopev2/` (Linux/Mac) or `C:\Users\<username>\.insightface\models\antelopev2\` (Windows)
+   - Size: ~500MB total
+   - Download happens automatically on first API startup
+   - Requires internet connection on first run
 
 3. **Start Services**
    ```bash

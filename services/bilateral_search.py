@@ -29,6 +29,8 @@ class BilateralSearchService:
         self,
         vector_db: VectorDatabaseService,
         face_threshold: float = 0.65,
+        face_threshold_adult: Optional[float] = None,
+        face_threshold_child: Optional[float] = None,
         metadata_weight: float = 0.3,
         age_tolerance: int = 5,
         initial_search_threshold: float = 0.60,
@@ -40,7 +42,9 @@ class BilateralSearchService:
         
         Args:
             vector_db: Vector database service instance
-            face_threshold: Minimum face similarity threshold for final filtering (0-1)
+            face_threshold: Minimum face similarity threshold for final filtering (0-1) - backward compatibility
+            face_threshold_adult: Face similarity threshold for adults (0-1). If None, uses face_threshold.
+            face_threshold_child: Face similarity threshold for children (0-1). If None, uses face_threshold.
             metadata_weight: Weight for metadata similarity in final score (0-1)
             age_tolerance: Age tolerance in years for matching
             initial_search_threshold: Initial Qdrant search threshold (0-1)
@@ -48,7 +52,10 @@ class BilateralSearchService:
             face_metadata_fallback_threshold: Minimum face similarity when metadata is high (0-1)
         """
         self.vector_db = vector_db
-        self.face_threshold = face_threshold
+        # Use separate thresholds for adults and children if provided, otherwise use face_threshold for both
+        self.face_threshold_adult = face_threshold_adult if face_threshold_adult is not None else face_threshold
+        self.face_threshold_child = face_threshold_child if face_threshold_child is not None else face_threshold
+        self.face_threshold = face_threshold  # Keep for backward compatibility
         self.metadata_weight = metadata_weight
         self.face_weight = 1.0 - metadata_weight
         self.age_tolerance = age_tolerance
@@ -56,8 +63,9 @@ class BilateralSearchService:
         self.combined_score_threshold = combined_score_threshold
         self.face_metadata_fallback_threshold = face_metadata_fallback_threshold
         
-        logger.info(f"Bilateral search initialized with face_threshold={face_threshold}, "
-                   f"initial_search_threshold={initial_search_threshold}, "
+        logger.info(f"Bilateral search initialized with:")
+        logger.info(f"  face_threshold_adult={self.face_threshold_adult}, face_threshold_child={self.face_threshold_child}")
+        logger.info(f"  initial_search_threshold={initial_search_threshold}, "
                    f"combined_score_threshold={combined_score_threshold}, "
                    f"metadata_weight={metadata_weight}")
     
@@ -111,11 +119,16 @@ class BilateralSearchService:
             # Accept matches with good face similarity OR good combined score OR decent face similarity with good metadata
             # BUT reject suspicious false positives (high face similarity but very low metadata similarity)
             # NOTE: This is a human-in-the-loop system - we return ranked candidates for review, not hard yes/no decisions
+            # Use age-appropriate threshold for each candidate
             filtered_matches = []
             for m in reranked_matches:
                 # Validate match first (rejects suspicious false positives, especially for children)
                 if self._validate_match(m):
-                    if ((m['face_similarity'] >= self.face_threshold) or 
+                    # Get age-appropriate threshold for the matched person
+                    match_metadata = m.get('payload', {})
+                    threshold_for_match = self._get_face_threshold_for_person(match_metadata)
+                    
+                    if ((m['face_similarity'] >= threshold_for_match) or 
                         (m['combined_score'] >= self.combined_score_threshold) or
                         (m['face_similarity'] >= self.face_metadata_fallback_threshold and m['metadata_similarity'] >= 0.60)):
                         filtered_matches.append(m)
@@ -184,10 +197,15 @@ class BilateralSearchService:
             # Accept matches with good face similarity OR good combined score OR decent face similarity with good metadata
             # BUT reject suspicious false positives (high face similarity but very low metadata similarity)
             # NOTE: This is a human-in-the-loop system - we return ranked candidates for review, not hard yes/no decisions
+            # Use age-appropriate threshold for each candidate
             filtered_matches = []
             for m in reranked_matches:
                 if self._validate_match(m):
-                    if (m['face_similarity'] >= self.face_threshold) or \
+                    # Get age-appropriate threshold for the matched person
+                    match_metadata = m.get('payload', {})
+                    threshold_for_match = self._get_face_threshold_for_person(match_metadata)
+                    
+                    if (m['face_similarity'] >= threshold_for_match) or \
                        (m['combined_score'] >= self.combined_score_threshold) or \
                        (m['face_similarity'] >= self.face_metadata_fallback_threshold and m['metadata_similarity'] >= 0.60):
                         filtered_matches.append(m)
@@ -388,10 +406,74 @@ class BilateralSearchService:
         
         return 1.0 if gender1 == gender2 else 0.0
     
+    def _is_child(self, metadata: Dict[str, Any]) -> bool:
+        """
+        Determine if a person is a child based on metadata.
+        
+        Args:
+            metadata: Person metadata dictionary
+            
+        Returns:
+            True if person is a child (age < 18), False if adult or age unknown
+        """
+        # Try to get age from various fields
+        age = None
+        
+        # Check age_at_disappearance (for missing persons)
+        if 'age_at_disappearance' in metadata and metadata['age_at_disappearance'] is not None:
+            try:
+                age = int(metadata['age_at_disappearance'])
+            except (ValueError, TypeError):
+                pass
+        
+        # Check current_age_estimate (for found persons or current age)
+        if age is None and 'current_age_estimate' in metadata and metadata['current_age_estimate'] is not None:
+            try:
+                age = int(metadata['current_age_estimate'])
+            except (ValueError, TypeError):
+                pass
+        
+        # Check estimated_current_age (alternative field name)
+        if age is None and 'estimated_current_age' in metadata and metadata['estimated_current_age'] is not None:
+            try:
+                age = int(metadata['estimated_current_age'])
+            except (ValueError, TypeError):
+                pass
+        
+        # Check age field (generic)
+        if age is None and 'age' in metadata and metadata['age'] is not None:
+            try:
+                age = int(metadata['age'])
+            except (ValueError, TypeError):
+                pass
+        
+        # If age is found, check if < 18
+        if age is not None:
+            return age < 18
+        
+        # If age is unknown, default to adult (more lenient)
+        # This is a conservative choice: unknown age = use adult threshold
+        return False
+    
+    def _get_face_threshold_for_person(self, metadata: Dict[str, Any]) -> float:
+        """
+        Get the appropriate face threshold based on person's age.
+        
+        Args:
+            metadata: Person metadata dictionary
+            
+        Returns:
+            face_threshold_child if person is a child, face_threshold_adult otherwise
+        """
+        if self._is_child(metadata):
+            return self.face_threshold_child
+        else:
+            return self.face_threshold_adult
+    
     def _check_age_consistency(
-        self, 
-        metadata1: Dict[str, Any], 
-        metadata2: Dict[str, Any], 
+        self,
+        metadata1: Dict[str, Any],
+        metadata2: Dict[str, Any],
         search_type: str
     ) -> float:
         """Check age consistency between missing and found person records."""
@@ -550,8 +632,6 @@ class BilateralSearchService:
                 elif query_age_info is None:
                     both_children = True  # Conservative: assume both children if match is child
             
-            both_children = (query_age is not None and query_age < 10) and (match_age is not None and match_age < 10)
-            
             # STRICT REJECTION: Gender mismatch with high face similarity (>0.85)
             # Gender is a critical distinguishing factor - different genders should NOT match
             # Even if faces look similar, gender mismatch is a strong indicator of false positive
@@ -666,7 +746,9 @@ class BilateralSearchService:
             return {
                 'missing_persons_count': missing_stats['points_count'],
                 'found_persons_count': found_stats['points_count'],
-                'face_threshold': self.face_threshold,
+                'face_threshold_adult': self.face_threshold_adult,
+                'face_threshold_child': self.face_threshold_child,
+                'face_threshold': self.face_threshold,  # Backward compatibility
                 'metadata_weight': self.metadata_weight,
                 'age_tolerance': self.age_tolerance,
                 'total_records': missing_stats['points_count'] + found_stats['points_count']
