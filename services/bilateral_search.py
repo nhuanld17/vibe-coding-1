@@ -612,25 +612,31 @@ class BilateralSearchService:
             gender_match = match_details.get('gender_match', 1.0)
             age_consistency = match_details.get('age_consistency', 1.0)
             
-            # Check if both are children (age < 10)
+            # Check if both are children (age < 18, consistent with _is_child method)
             # Note: match['payload'] contains the matched person's metadata
             match_metadata = match.get('payload', {})
             
             # Try to get ages from match metadata
-            match_age = match_metadata.get('age_at_disappearance') or match_metadata.get('current_age_estimate')
+            # Use explicit None check to handle age=0 correctly (0 is falsy but valid)
+            match_age = match_metadata.get('age_at_disappearance')
+            if match_age is None:
+                match_age = match_metadata.get('current_age_estimate')
             
             # For children detection, check if the matched person is a child
             # Also check query age from match_details if available
             both_children = False
-            if match_age is not None and match_age < 10:
+            if match_age is not None and match_age < 18:
                 # If matched person is a child, check query age from match_details
                 query_age_info = match_details.get('query_current_age') or match_details.get('query_age_at_disappearance')
-                if query_age_info is not None and query_age_info < 10:
+                if query_age_info is not None and query_age_info < 18:
                     both_children = True
                 # If we can't determine query age but match is a child, be conservative
                 # This helps prevent false positives for children (who have less distinctive faces)
                 elif query_age_info is None:
                     both_children = True  # Conservative: assume both children if match is child
+            
+            # NOTE: No additional assignment to both_children after this point
+            # Any code that overwrites both_children here would be a bug and should be removed
             
             # STRICT REJECTION: Gender mismatch with high face similarity (>0.85)
             # Gender is a critical distinguishing factor - different genders should NOT match
