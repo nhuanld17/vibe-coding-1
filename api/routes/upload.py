@@ -87,7 +87,7 @@ def process_image_and_extract_face(
 def format_match_results(
     matches: List[dict],
     confidence_scoring,
-    min_confidence_threshold: float = 0.50  # Minimum confidence score to show (reject VERY_LOW and LOW matches)
+    min_confidence_threshold: float = 0.50  # Allow LOW matches (0.50-0.60) for extra context
 ) -> List[MatchResult]:
     """
     Format match results with confidence scoring.
@@ -95,7 +95,7 @@ def format_match_results(
     Args:
         matches: List of match dictionaries from bilateral search
         confidence_scoring: Confidence scoring service
-        min_confidence_threshold: Minimum confidence score to include (default 0.40 = reject VERY_LOW)
+        min_confidence_threshold: Minimum confidence score to include (default 0.50 = reject VERY_LOW, keep LOW)
     
     Returns:
         List of formatted match results (only matches with confidence >= min_confidence_threshold)
