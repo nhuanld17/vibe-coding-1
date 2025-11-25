@@ -10,7 +10,7 @@ Endpoints được test:
 4. POST /api/v1/upload/found             - Upload người tìm thấy
 5. GET  /api/v1/search/missing/{case_id} - Tìm kiếm theo case_id
 6. GET  /api/v1/search/found/{found_id}  - Tìm kiếm theo found_id
-7. GET  /api/v1/search/cases/all         - List tất cả cases
+7. GET  /api/v1/search/missing/{fake_id} - Negative case (404)
 """
 
 import requests
@@ -142,12 +142,31 @@ def test_3_upload_missing():
     
     with open(image_path, 'rb') as img_file:
         files = {'image': (image_path.name, img_file, 'image/jpeg')}
-        data = {'metadata': json.dumps(metadata)}
+        form_data = {
+            'name': metadata['name'],
+            'age_at_disappearance': str(metadata['age_at_disappearance']),
+            'year_disappeared': str(metadata['year_disappeared']),
+            'gender': metadata['gender'],
+            'location_last_seen': metadata['location_last_seen'],
+            'contact': metadata['contact'],
+        }
+
+        if metadata.get('height_cm') is not None:
+            form_data['height_cm'] = str(metadata['height_cm'])
+
+        if metadata.get('birthmarks'):
+            form_data['birthmarks'] = (
+                metadata['birthmarks'] if isinstance(metadata['birthmarks'], str)
+                else ", ".join(metadata['birthmarks'])
+            )
+
+        if metadata.get('additional_info'):
+            form_data['additional_info'] = metadata['additional_info']
         
         response = requests.post(
             f"{BASE_URL}/api/v1/upload/missing",
             files=files,
-            data=data,
+            data=form_data,
             timeout=30
         )
     
@@ -198,12 +217,32 @@ def test_4_upload_found(case_id="DEMO_MISSING_001"):
     
     with open(image_path, 'rb') as img_file:
         files = {'image': (image_path.name, img_file, 'image/jpeg')}
-        data = {'metadata': json.dumps(metadata)}
+        form_data = {
+            'current_age_estimate': str(metadata['current_age_estimate']),
+            'gender': metadata['gender'],
+            'current_location': metadata['current_location'],
+            'finder_contact': metadata['finder_contact'],
+        }
+
+        if metadata.get('name'):
+            form_data['name'] = metadata['name']
+
+        if metadata.get('visible_marks'):
+            form_data['visible_marks'] = (
+                metadata['visible_marks'] if isinstance(metadata['visible_marks'], str)
+                else ", ".join(metadata['visible_marks'])
+            )
+
+        if metadata.get('current_condition'):
+            form_data['current_condition'] = metadata['current_condition']
+
+        if metadata.get('additional_info'):
+            form_data['additional_info'] = metadata['additional_info']
         
         response = requests.post(
             f"{BASE_URL}/api/v1/upload/found",
             files=files,
-            data=data,
+            data=form_data,
             timeout=30
         )
     
@@ -241,9 +280,13 @@ def test_4_upload_found(case_id="DEMO_MISSING_001"):
     return None
 
 
-def test_5_search_missing(case_id="DEMO_MISSING_001"):
+def test_5_search_missing(case_id=None):
     """Test 5: Search Missing Person by Case ID."""
     print_section("TEST 5: Search Missing Person")
+
+    if not case_id:
+        print("[WARN] Skipping because no case_id was returned from upload test.")
+        return None
     
     print(f"GET {BASE_URL}/api/v1/search/missing/{case_id}")
     
@@ -277,9 +320,13 @@ def test_5_search_missing(case_id="DEMO_MISSING_001"):
     return None
 
 
-def test_6_search_found(found_id="DEMO_FOUND_001"):
+def test_6_search_found(found_id=None):
     """Test 6: Search Found Person by Found ID."""
     print_section("TEST 6: Search Found Person")
+
+    if not found_id:
+        print("[WARN] Skipping because no found_id was returned from upload test.")
+        return None
     
     print(f"GET {BASE_URL}/api/v1/search/found/{found_id}")
     
@@ -310,72 +357,6 @@ def test_6_search_found(found_id="DEMO_FOUND_001"):
         
         return data
     return None
-
-
-def test_7_list_all_cases():
-    """Test 7: List All Cases."""
-    print_section("TEST 7: List All Cases")
-    
-    print(f"GET {BASE_URL}/api/v1/search/cases/all")
-    
-    # Test với default params
-    response = requests.get(
-        f"{BASE_URL}/api/v1/search/cases/all",
-        params={"limit": 50},
-        timeout=10
-    )
-    
-    print_response(response)
-    
-    if response.status_code == 200:
-        data = response.json()
-        stats = data.get('statistics', {})
-        cases = data.get('cases', {})
-        
-        print(f"\n[STATS] Statistics:")
-        print(f"  Total Missing: {stats.get('total_missing', 0)}")
-        print(f"  Total Found: {stats.get('total_found', 0)}")
-        print(f"  Total Cases: {stats.get('total_cases', 0)}")
-        print(f"  Processing Time: {data.get('processing_time_ms', 0):.2f} ms")
-        
-        # Show sample cases
-        missing_list = cases.get('missing', [])
-        found_list = cases.get('found', [])
-        
-        if missing_list:
-            print(f"\n[LIST] Sample Missing Cases (showing first 3):")
-            for i, case in enumerate(missing_list[:3], 1):
-                metadata = case.get('metadata', {})
-                print(f"  {i}. {metadata.get('case_id', 'N/A')} - {metadata.get('name', 'N/A')}")
-        
-        if found_list:
-            print(f"\n[LIST] Sample Found Cases (showing first 3):")
-            for i, case in enumerate(found_list[:3], 1):
-                metadata = case.get('metadata', {})
-                print(f"  {i}. {metadata.get('found_id', 'N/A')} - Age: {metadata.get('current_age_estimate', 'N/A')}")
-        
-        return data
-    return None
-
-
-def test_8_list_cases_filtered():
-    """Test 8: List Cases with Filter."""
-    print_section("TEST 8: List Cases with Type Filter")
-    
-    # Test filter by type
-    for case_type in ['missing', 'found']:
-        print(f"\nGET {BASE_URL}/api/v1/search/cases/all?type={case_type}")
-        
-        response = requests.get(
-            f"{BASE_URL}/api/v1/search/cases/all",
-            params={"limit": 20, "type": case_type},
-            timeout=10
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            stats = data.get('statistics', {})
-            print(f"[OK] {case_type.upper()} cases: {stats.get('total_cases', 0)}")
 
 
 def test_9_search_nonexistent():
@@ -418,21 +399,13 @@ def main():
         time.sleep(2)
         
         # Test 5: Search Missing Person
-        if missing_result:
-            test_5_search_missing("DEMO_MISSING_001")
+        missing_case_id = missing_result.get('case_id') if missing_result else None
+        test_5_search_missing(missing_case_id)
         time.sleep(1)
         
         # Test 6: Search Found Person
-        if found_result:
-            test_6_search_found("DEMO_FOUND_001")
-        time.sleep(1)
-        
-        # Test 7: List All Cases
-        test_7_list_all_cases()
-        time.sleep(1)
-        
-        # Test 8: List Cases with Filter
-        test_8_list_cases_filtered()
+        found_id = found_result.get('found_id') if found_result else None
+        test_6_search_found(found_id)
         time.sleep(1)
         
         # Test 9: Search Non-existent

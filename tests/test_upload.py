@@ -42,11 +42,32 @@ try:
         files = {
             'image': (image_path.name, img_file, 'image/jpeg')
         }
-        data = {
-            'metadata': json.dumps(metadata)
+
+        # Backend now expects individual form fields instead of a metadata JSON blob.
+        # Convert our metadata dictionary to the required multipart form payload.
+        form_data = {
+            'name': metadata['name'],
+            'age_at_disappearance': str(metadata['age_at_disappearance']),
+            'year_disappeared': str(metadata['year_disappeared']),
+            'gender': metadata['gender'],
+            'location_last_seen': metadata['location_last_seen'],
+            'contact': metadata['contact'],
         }
-        
-        response = requests.post(API_URL, files=files, data=data, timeout=30)
+
+        if metadata.get('height_cm') is not None:
+            form_data['height_cm'] = str(metadata['height_cm'])
+
+        if metadata.get('birthmarks'):
+            # API expects a comma-separated string
+            form_data['birthmarks'] = (
+                metadata['birthmarks'] if isinstance(metadata['birthmarks'], str)
+                else ", ".join(metadata['birthmarks'])
+            )
+
+        if metadata.get('additional_info'):
+            form_data['additional_info'] = metadata['additional_info']
+
+        response = requests.post(API_URL, files=files, data=form_data, timeout=30)
     
     print(f"\nStatus Code: {response.status_code}")
     
