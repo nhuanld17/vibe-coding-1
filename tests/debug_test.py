@@ -28,14 +28,18 @@ print(f"  payload: {match['payload']}")
 
 # Check logic
 match_metadata_check = match.get('payload', {})
-match_age_check = match_metadata_check.get('age_at_disappearance') or match_metadata_check.get('current_age_estimate')
+match_age_check = match_metadata_check.get('age_at_disappearance')
+if match_age_check is None:
+    match_age_check = match_metadata_check.get('current_age_estimate')
 
 print(f"\nmatch_age_check: {match_age_check}")
 
 both_children = False
 if match_age_check is not None and match_age_check < 18:
     print("  Match age < 18, checking query age...")
-    query_age_info_check = match.get('match_details', {}).get('query_current_age') or match.get('match_details', {}).get('query_age_at_disappearance')
+    query_age_info_check = match.get('match_details', {}).get('query_current_age')
+    if query_age_info_check is None:
+        query_age_info_check = match.get('match_details', {}).get('query_age_at_disappearance')
     print(f"  query_age_info_check: {query_age_info_check}")
     if query_age_info_check is not None and query_age_info_check < 18:
         both_children = True

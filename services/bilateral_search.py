@@ -645,7 +645,9 @@ class BilateralSearchService:
             both_children = False
             if match_age is not None and match_age < 18:
                 # If matched person is a child, check query age from match_details
-                query_age_info = match_details.get('query_current_age') or match_details.get('query_age_at_disappearance')
+                query_age_info = match_details.get('query_current_age')
+                if query_age_info is None:
+                    query_age_info = match_details.get('query_age_at_disappearance')
                 if query_age_info is not None and query_age_info < 18:
                     both_children = True
                 # If we can't determine query age but match is a child, be conservative

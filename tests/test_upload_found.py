@@ -42,11 +42,30 @@ try:
         files = {
             'image': (image_path.name, img_file, 'image/jpeg')
         }
-        data = {
-            'metadata': json.dumps(metadata)
+
+        form_data = {
+            'current_age_estimate': str(metadata['current_age_estimate']),
+            'gender': metadata['gender'],
+            'current_location': metadata['current_location'],
+            'finder_contact': metadata['finder_contact'],
         }
-        
-        response = requests.post(API_URL, files=files, data=data, timeout=30)
+
+        if metadata.get('name'):
+            form_data['name'] = metadata['name']
+
+        if metadata.get('visible_marks'):
+            form_data['visible_marks'] = (
+                metadata['visible_marks'] if isinstance(metadata['visible_marks'], str)
+                else ", ".join(metadata['visible_marks'])
+            )
+
+        if metadata.get('current_condition'):
+            form_data['current_condition'] = metadata['current_condition']
+
+        if metadata.get('additional_info'):
+            form_data['additional_info'] = metadata['additional_info']
+
+        response = requests.post(API_URL, files=files, data=form_data, timeout=30)
     
     print(f"\nStatus Code: {response.status_code}")
     
