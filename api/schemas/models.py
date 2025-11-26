@@ -5,7 +5,7 @@ This module defines request and response schemas for API endpoints.
 """
 
 from pydantic import BaseModel, Field, validator
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
 from enum import Enum
 
@@ -227,7 +227,7 @@ class CaseRecord(BaseModel):
     last_seen_location: Optional[str] = Field(None, description="Last seen location")
     contact: Optional[str] = Field(None, description="Contact information")
     image_url: Optional[str] = Field(None, description="Image URL")
-    upload_timestamp: Optional[float] = Field(None, description="Upload timestamp")
+    upload_timestamp: Optional[Union[str, float]] = Field(None, description="Upload timestamp (ISO string or Unix timestamp)")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
 
 
