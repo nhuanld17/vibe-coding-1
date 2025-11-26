@@ -5,7 +5,7 @@ This module defines request and response schemas for API endpoints.
 """
 
 from pydantic import BaseModel, Field, validator
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
 from enum import Enum
 
@@ -213,6 +213,32 @@ class SystemStats(BaseModel):
     total_searches_today: Optional[int] = Field(None, description="Number of searches today")
     average_processing_time_ms: Optional[float] = Field(None, description="Average processing time")
     uptime_seconds: Optional[float] = Field(None, description="System uptime in seconds")
+
+
+# List Cases Models
+
+class CaseRecord(BaseModel):
+    """Individual case record schema."""
+    id: str = Field(..., description="Case ID")
+    type: str = Field(..., description="Case type: 'missing' or 'found'")
+    name: Optional[str] = Field(None, description="Person name")
+    age: Optional[int] = Field(None, description="Person age")
+    gender: Optional[str] = Field(None, description="Person gender")
+    last_seen_location: Optional[str] = Field(None, description="Last seen location")
+    contact: Optional[str] = Field(None, description="Contact information")
+    image_url: Optional[str] = Field(None, description="Image URL")
+    upload_timestamp: Optional[Union[str, float]] = Field(None, description="Upload timestamp (ISO string or Unix timestamp)")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
+
+
+class AllCasesResponse(BaseModel):
+    """Response schema for listing all cases."""
+    success: bool = Field(..., description="Whether request was successful")
+    message: str = Field(..., description="Response message")
+    cases: List[CaseRecord] = Field(..., description="List of all cases")
+    total_count: int = Field(..., description="Total number of cases")
+    missing_count: int = Field(..., description="Number of missing persons")
+    found_count: int = Field(..., description="Number of found persons")
 
 
 # Validation Models
