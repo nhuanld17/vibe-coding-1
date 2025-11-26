@@ -12,12 +12,112 @@ from fastapi import APIRouter, HTTPException, status, Depends, Query
 from loguru import logger
 
 from ..dependencies import VectorDBDep, ConfidenceScoringDep, SettingsDep, BilateralSearchDep
-from ..schemas.models import SearchResponse, SearchParameters, MatchResult, PersonRecord, ConfidenceExplanation, ConfidenceFactor
+from ..schemas.models import SearchResponse, SearchParameters, MatchResult, PersonRecord, ConfidenceExplanation, ConfidenceFactor, AllCasesResponse, CaseRecord
 from utils.validation import validate_search_parameters
 from .upload import format_match_results
 
 
 router = APIRouter()
+
+
+@router.get("/cases/all", response_model=AllCasesResponse)
+async def get_all_cases(
+    vector_db: VectorDBDep,
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of cases to return"),
+    type: Optional[str] = Query(None, description="Filter by type: 'missing' or 'found'")
+):
+    """
+    Get all cases (missing and found persons).
+    
+    Args:
+        vector_db: Vector database service
+        limit: Maximum number of cases to return per collection
+        type: Optional filter by type ('missing' or 'found')
+    
+    Returns:
+        AllCasesResponse with list of all cases
+    """
+    try:
+        start_time = time.time()
+        cases = []
+        missing_count = 0
+        found_count = 0
+        
+        # Fetch missing persons if not filtered for found only
+        if type is None or type == "missing":
+            try:
+                missing_points = vector_db.client.scroll(
+                    collection_name="missing_persons",
+                    limit=limit,
+                    with_payload=True,
+                    with_vectors=False
+                )[0]
+                
+                for point in missing_points:
+                    payload = point.payload
+                    cases.append(CaseRecord(
+                        id=str(point.id),
+                        type="missing",
+                        name=payload.get("name"),
+                        age=payload.get("age"),
+                        gender=payload.get("gender"),
+                        last_seen_location=payload.get("last_seen_location"),
+                        contact=payload.get("contact"),
+                        image_url=payload.get("image_url"),
+                        upload_timestamp=payload.get("upload_timestamp"),
+                        metadata=payload
+                    ))
+                    missing_count += 1
+            except Exception as e:
+                logger.warning(f"Failed to fetch missing persons: {str(e)}")
+        
+        # Fetch found persons if not filtered for missing only
+        if type is None or type == "found":
+            try:
+                found_points = vector_db.client.scroll(
+                    collection_name="found_persons",
+                    limit=limit,
+                    with_payload=True,
+                    with_vectors=False
+                )[0]
+                
+                for point in found_points:
+                    payload = point.payload
+                    cases.append(CaseRecord(
+                        id=str(point.id),
+                        type="found",
+                        name=payload.get("name"),
+                        age=payload.get("age"),
+                        gender=payload.get("gender"),
+                        last_seen_location=payload.get("last_seen_location") or payload.get("found_location"),
+                        contact=payload.get("finder_contact") or payload.get("contact"),
+                        image_url=payload.get("image_url"),
+                        upload_timestamp=payload.get("upload_timestamp"),
+                        metadata=payload
+                    ))
+                    found_count += 1
+            except Exception as e:
+                logger.warning(f"Failed to fetch found persons: {str(e)}")
+        
+        processing_time = (time.time() - start_time) * 1000
+        
+        logger.info(f"Retrieved {len(cases)} cases ({missing_count} missing, {found_count} found) in {processing_time:.2f}ms")
+        
+        return AllCasesResponse(
+            success=True,
+            message=f"Retrieved {len(cases)} case(s)",
+            cases=cases,
+            total_count=len(cases),
+            missing_count=missing_count,
+            found_count=found_count
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to get all cases: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve cases"
+        )
 
 
 def format_person_record(point_data: dict) -> PersonRecord:
