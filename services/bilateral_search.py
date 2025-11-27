@@ -125,32 +125,26 @@ class BilateralSearchService:
                 vector_matches, found_metadata, 'missing'
             )
             
-            # Filter by minimum combined score or face similarity (more lenient)
-            # Accept matches with good face similarity OR good combined score OR decent face similarity with good metadata
-            # BUT reject suspicious false positives (high face similarity but very low metadata similarity)
-            # NOTE: This is a human-in-the-loop system - we return ranked candidates for review, not hard yes/no decisions
-            # Use age-appropriate threshold for each candidate
-            filtered_matches = []
-            for m in reranked_matches:
-                # Validate match first (rejects suspicious false positives, especially for children)
-                if self._validate_match(m):
-                    # Get age-appropriate threshold for the matched person
-                    match_metadata = m.get('payload', {})
-                    threshold_for_match = self._get_face_threshold_for_person(match_metadata)
-                    
-                    if ((m['face_similarity'] >= threshold_for_match) or 
-                        (m['combined_score'] >= self.combined_score_threshold) or
-                        (m['face_similarity'] >= self.face_metadata_fallback_threshold and m['metadata_similarity'] >= 0.60)):
-                        filtered_matches.append(m)
+            ordered_matches = sorted(
+                reranked_matches,
+                key=lambda m: m.get('combined_score', m.get('face_similarity', 0.0)),
+                reverse=True
+            )
+            validated_matches = [m for m in ordered_matches if self._validate_match(m)]
+            final_pool = validated_matches if validated_matches else ordered_matches
+            top_k_matches = final_pool[:limit]
             
-            logger.info(f"After filtering: {len(filtered_matches)} matches (from {len(reranked_matches)} reranked)")
-            
-            # Limit results to top-k for human review
-            # This is intentionally NOT a hard yes/no decision - all candidates need human verification
-            final_matches = filtered_matches[:limit]
-            
-            logger.info(f"Found {len(final_matches)} potential missing person matches")
-            return final_matches
+            logger.info(
+                f"Returning {len(top_k_matches)} top missing-person candidates "
+                f"(limit={limit}, total_candidates={len(ordered_matches)})"
+            )
+            return top_k_matches
+
+
+
+
+
+
             
         except Exception as e:
             logger.error(f"Search for missing persons failed: {str(e)}")
@@ -203,31 +197,22 @@ class BilateralSearchService:
                 vector_matches, missing_metadata, 'found'
             )
             
-            # Filter by minimum combined score or face similarity (more lenient)
-            # Accept matches with good face similarity OR good combined score OR decent face similarity with good metadata
-            # BUT reject suspicious false positives (high face similarity but very low metadata similarity)
-            # NOTE: This is a human-in-the-loop system - we return ranked candidates for review, not hard yes/no decisions
-            # Use age-appropriate threshold for each candidate
-            filtered_matches = []
-            for m in reranked_matches:
-                if self._validate_match(m):
-                    # Get age-appropriate threshold for the matched person
-                    match_metadata = m.get('payload', {})
-                    threshold_for_match = self._get_face_threshold_for_person(match_metadata)
-                    
-                    if (m['face_similarity'] >= threshold_for_match) or \
-                       (m['combined_score'] >= self.combined_score_threshold) or \
-                       (m['face_similarity'] >= self.face_metadata_fallback_threshold and m['metadata_similarity'] >= 0.60):
-                        filtered_matches.append(m)
+            ordered_matches = sorted(
+                reranked_matches,
+                key=lambda m: m.get('combined_score', m.get('face_similarity', 0.0)),
+                reverse=True
+            )
+            validated_matches = [m for m in ordered_matches if self._validate_match(m)]
+            final_pool = validated_matches if validated_matches else ordered_matches
+            top_k_matches = final_pool[:limit]
             
-            logger.info(f"After filtering: {len(filtered_matches)} matches (from {len(reranked_matches)} reranked)")
-            
-            # Limit results to top-k for human review
-            # This is intentionally NOT a hard yes/no decision - all candidates need human verification
-            final_matches = filtered_matches[:limit]
-            
-            logger.info(f"Found {len(final_matches)} potential found person matches")
-            return final_matches
+            logger.info(
+                f"Returning {len(top_k_matches)} top found-person candidates "
+                f"(limit={limit}, total_candidates={len(ordered_matches)})"
+            )
+            return top_k_matches
+
+
             
         except Exception as e:
             logger.error(f"Search for found persons failed: {str(e)}")
@@ -971,31 +956,23 @@ class BilateralSearchService:
             # Stage 4: Sort and validate
             aggregated_results.sort(key=lambda x: x['combined_score'], reverse=True)
             
-            filtered_by_threshold = []
             for result in aggregated_results:
                 age_gap = result.get('best_age_gap')
                 match_metadata = result.get('payload', {})
                 threshold = self._get_threshold_for_age_gap(age_gap, match_metadata)
                 result['threshold_used'] = threshold
                 result['multi_image_details']['threshold_used'] = threshold
-                if (
-                    result['face_similarity'] >= threshold or
-                    result['combined_score'] >= self.combined_score_threshold or
-                    (result['face_similarity'] >= self.face_metadata_fallback_threshold and
-                     result['metadata_similarity'] >= 0.60)
-                ):
-                    filtered_by_threshold.append(result)
-                else:
-                    logger.debug(
-                        f"Multi-image match {result.get('id')} filtered by age-gap threshold "
-                        f"(face={result['face_similarity']:.3f}, threshold={threshold:.3f}, age_gap={age_gap})"
-                    )
             
-            validated = [r for r in filtered_by_threshold if self._validate_match(r)]
-            final_results = validated[:limit]
+            validated = [r for r in aggregated_results if self._validate_match(r)]
+            final_pool = validated if validated else aggregated_results
+            final_results = final_pool[:limit]
             
-            logger.info(f"Stage 4: Returning {len(final_results)} persons (from {len(aggregated_results)} aggregated)")
+            logger.info(
+                f"Stage 4: Returning {len(final_results)} persons (limit={limit}, total_aggregated={len(aggregated_results)})"
+            )
             return final_results
+
+
             
         except Exception as e:
             logger.error(f"Multi-image search for found persons failed: {str(e)}", exc_info=True)
@@ -1125,31 +1102,23 @@ class BilateralSearchService:
             # Stage 4: Sort and validate
             aggregated_results.sort(key=lambda x: x['combined_score'], reverse=True)
             
-            filtered_by_threshold = []
             for result in aggregated_results:
                 age_gap = result.get('best_age_gap')
                 match_metadata = result.get('payload', {})
                 threshold = self._get_threshold_for_age_gap(age_gap, match_metadata)
                 result['threshold_used'] = threshold
                 result['multi_image_details']['threshold_used'] = threshold
-                if (
-                    result['face_similarity'] >= threshold or
-                    result['combined_score'] >= self.combined_score_threshold or
-                    (result['face_similarity'] >= self.face_metadata_fallback_threshold and
-                     result['metadata_similarity'] >= 0.60)
-                ):
-                    filtered_by_threshold.append(result)
-                else:
-                    logger.debug(
-                        f"Multi-image match {result.get('id')} filtered by age-gap threshold "
-                        f"(face={result['face_similarity']:.3f}, threshold={threshold:.3f}, age_gap={age_gap})"
-                    )
             
-            validated = [r for r in filtered_by_threshold if self._validate_match(r)]
-            final_results = validated[:limit]
+            validated = [r for r in aggregated_results if self._validate_match(r)]
+            final_pool = validated if validated else aggregated_results
+            final_results = final_pool[:limit]
             
-            logger.info(f"Stage 4: Returning {len(final_results)} persons (from {len(aggregated_results)} aggregated)")
+            logger.info(
+                f"Stage 4: Returning {len(final_results)} persons (limit={limit}, total_aggregated={len(aggregated_results)})"
+            )
             return final_results
+
+
             
         except Exception as e:
             logger.error(f"Multi-image search for missing persons failed: {str(e)}", exc_info=True)

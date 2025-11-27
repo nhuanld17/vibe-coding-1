@@ -193,7 +193,7 @@ async def search_missing_person(
     bilateral_search: BilateralSearchDep,
     confidence_scoring: ConfidenceScoringDep,
     settings: SettingsDep,
-    limit: int = Query(default=1, ge=1, le=100, description="Maximum number of results"),
+    limit: int = Query(default=10, ge=1, le=100, description="Maximum number of results (top-K)"),
     include_similar: bool = Query(default=False, description="Include similar records")
 ):
     """
@@ -347,7 +347,7 @@ async def search_found_person(
     bilateral_search: BilateralSearchDep,
     confidence_scoring: ConfidenceScoringDep,
     settings: SettingsDep,
-    limit: int = Query(default=1, ge=1, le=100, description="Maximum number of results"),
+    limit: int = Query(default=10, ge=1, le=100, description="Maximum number of results (top-K)"),
     include_similar: bool = Query(default=False, description="Include similar records")
 ):
     """
