@@ -135,7 +135,7 @@ class UploadedImageInfo(BaseModel):
     image_id: str = Field(..., description="Unique image identifier", example="MISS_001_img_0")
     image_index: int = Field(..., ge=0, description="Index of image in upload batch (0-based)", example=0)
     image_url: Optional[str] = Field(None, description="Cloudinary URL for the image")
-    age_at_photo: int = Field(..., ge=0, le=120, description="Age when photo was taken", example=8)
+    age_at_photo: Optional[int] = Field(None, ge=0, le=120, description="Age when photo was taken (None if photo_year not provided)", example=8)
     photo_year: Optional[int] = Field(None, description="Year photo was taken", example=2010)
     quality_score: float = Field(..., ge=0.0, le=1.0, description="Photo quality score", example=0.85)
     validation_status: str = Field(default="valid", description="Always 'valid' for this type")
@@ -146,7 +146,7 @@ class ReferenceImageInfo(BaseModel):
     image_id: str = Field(..., description="Unique image identifier", example="MISS_001_img_1")
     image_index: int = Field(..., ge=0, description="Index in upload batch", example=1)
     image_url: Optional[str] = Field(None, description="Cloudinary URL for the image")
-    age_at_photo: int = Field(..., ge=0, le=120, description="Estimated age when photo taken", example=10)
+    age_at_photo: Optional[int] = Field(None, ge=0, le=120, description="Estimated age when photo taken (None if photo_year not provided)", example=10)
     photo_year: Optional[int] = Field(None, description="Year photo was taken if known", example=2005)
     validation_status: str = Field(
         ..., 
