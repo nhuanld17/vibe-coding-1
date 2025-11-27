@@ -320,7 +320,7 @@ def test_consistency_scoring_no_good_matches(aggregation_service):
 # ============================================================================
 
 def test_missing_age_metadata(aggregation_service):
-    """Test aggregation handles missing age_at_photo gracefully."""
+    """Test aggregation handles missing age_at_photo gracefully (skip bonus, not image)."""
     query_imgs = [
         create_test_image('Q0', 25, 'MISS_001'),
         {'image_id': 'Q1', 'embedding': np.random.rand(512).astype(np.float32), 'case_id': 'MISS_001'},  # No age
@@ -331,8 +331,10 @@ def test_missing_age_metadata(aggregation_service):
     
     result = aggregation_service.aggregate_multi_image_similarity(query_imgs, target_imgs)
     
-    # Should skip image with missing age
-    assert len(result.all_pair_scores) == 1
+    # Images with missing age should still be used (no bonus applied, but similarity computed)
+    # Q0 (age=25) vs T0 (age=30) = 1 pair with bonus
+    # Q1 (age=None) vs T0 (age=30) = 1 pair without bonus
+    assert len(result.all_pair_scores) == 2  # Both pairs should be included
 
 
 # ============================================================================

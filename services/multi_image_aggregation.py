@@ -272,11 +272,6 @@ class MultiImageAggregationService:
                 logger.debug(f"Skipping query image {query_image_id}: invalid embedding")
                 continue
             
-            # Skip if age is missing
-            if query_age is None:
-                logger.warning(f"Query image {query_image_id} missing age_at_photo, skipping")
-                continue
-            
             for target_img in target_images:
                 target_embedding = target_img.get('embedding')
                 target_image_id = target_img.get('image_id', 'unknown_target')
@@ -287,12 +282,7 @@ class MultiImageAggregationService:
                     logger.debug(f"Skipping target image {target_image_id}: invalid embedding")
                     continue
                 
-                # Skip if age is missing
-                if target_age is None:
-                    logger.warning(f"Target image {target_image_id} missing age_at_photo, skipping")
-                    continue
-                
-                # Compute cosine similarity
+                # Compute cosine similarity (ALWAYS, even if age is None)
                 try:
                     similarity = self._cosine_similarity(query_embedding, target_embedding)
                 except Exception as e:
@@ -301,18 +291,35 @@ class MultiImageAggregationService:
                     )
                     continue
                 
-                # Apply age-bracket preference bonus if enabled
+                # Apply age-bracket preference bonus ONLY if both ages are available
                 if self.age_bracket_preference_enabled:
-                    age_gap = abs(query_age - target_age)
-                    similarity = self._apply_age_bracket_bonus(similarity, age_gap)
+                    if query_age is not None and target_age is not None:
+                        age_gap = abs(query_age - target_age)
+                        similarity = self._apply_age_bracket_bonus(similarity, age_gap)
+                        logger.debug(
+                            f"Age bonus applied: query_age={query_age}, target_age={target_age}, "
+                            f"gap={age_gap}y, sim={similarity:.3f}"
+                        )
+                    else:
+                        logger.debug(
+                            f"Age bonus skipped: query_age={query_age}, target_age={target_age}, "
+                            f"using raw similarity={similarity:.3f}"
+                        )
+                
+                # Calculate age gap (0 if either age is None)
+                age_gap = abs(query_age - target_age) if (query_age is not None and target_age is not None) else 0
+                
+                # Use 0 for display if age is None (ImagePairScore expects int)
+                display_query_age = query_age if query_age is not None else 0
+                display_target_age = target_age if target_age is not None else 0
                 
                 pair_score = ImagePairScore(
                     query_image_id=query_image_id,
                     target_image_id=target_image_id,
                     similarity=similarity,
-                    query_age=query_age,
-                    target_age=target_age,
-                    age_gap=abs(query_age - target_age)
+                    query_age=display_query_age,
+                    target_age=display_target_age,
+                    age_gap=age_gap
                 )
                 pair_scores.append(pair_score)
         

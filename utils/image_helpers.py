@@ -68,12 +68,12 @@ def calculate_age_at_photo(
             f"year_disappeared must be between 1900 and {current_year + 1}, got {year_disappeared}"
         )
     
-    # If photo_year not provided, assume photo from disappearance year
+    # If photo_year not provided, return None (no age bonus will be applied)
     if photo_year is None:
         logger.debug(
-            f"photo_year not provided, assuming photo from year_disappeared ({year_disappeared})"
+            f"photo_year not provided, returning None (no age bonus will be applied)"
         )
-        return age_at_disappearance
+        return None
     
     # Validate photo_year
     if not isinstance(photo_year, int):

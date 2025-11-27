@@ -648,8 +648,8 @@ async def process_single_image(
             )
         except Exception as e:
             logger.error(f"Age calculation failed for image {idx}: {e}")
-            # Fallback to age_at_disappearance
-            age_at_photo = shared_params['age_at_disappearance']
+            # Return None (no age bonus will be applied, but image will still be used)
+            age_at_photo = None
         
         # 4. Upload to Cloudinary FIRST (before face detection)
         #    This ensures we save ALL images, even if face detection fails

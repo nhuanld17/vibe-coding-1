@@ -866,7 +866,7 @@ class BilateralSearchService:
                     candidate_images.append({
                         'image_id': point['payload'].get('image_id', point['id']),
                         'embedding': np.array(point['vector']),
-                        'age_at_photo': point['payload'].get('age_at_photo', 0),
+                        'age_at_photo': point['payload'].get('age_at_photo'),  # None if missing
                         'case_id': found_id
                     })
                 
@@ -997,7 +997,7 @@ class BilateralSearchService:
                     candidate_images.append({
                         'image_id': point['payload'].get('image_id', point['id']),
                         'embedding': np.array(point['vector']),
-                        'age_at_photo': point['payload'].get('age_at_photo', 0),
+                        'age_at_photo': point['payload'].get('age_at_photo'),  # None if missing
                         'case_id': case_id
                     })
                 
