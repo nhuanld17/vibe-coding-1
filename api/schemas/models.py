@@ -101,6 +101,12 @@ class FaceQualityMetrics(BaseModel):
     is_sharp: bool = Field(..., description="Whether face is sharp enough")
     is_bright_enough: bool = Field(..., description="Whether face has good brightness")
     is_contrasted: bool = Field(..., description="Whether face has good contrast")
+    quality_score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Normalized quality score (0-1 scale) aggregated from sharpness/brightness/contrast"
+    )
 
 
 class ConfidenceFactor(BaseModel):

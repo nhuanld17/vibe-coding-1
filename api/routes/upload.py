@@ -71,7 +71,8 @@ def process_image_and_extract_face(
             contrast=quality_metrics['contrast'],
             is_sharp=quality_metrics['is_sharp'],
             is_bright_enough=quality_metrics['is_bright_enough'],
-            is_contrasted=quality_metrics['is_contrasted']
+            is_contrasted=quality_metrics['is_contrasted'],
+            quality_score=quality_metrics['quality_score']
         )
         
         if not is_good_quality:
@@ -700,7 +701,7 @@ async def process_single_image(
             }
         
         # 6. Check quality threshold
-        quality_score = quality.sharpness if quality else 0.0
+        quality_score = quality.quality_score if quality else 0.0
         
         if quality_score < 0.60:
             # Low quality but face detected - save as reference only

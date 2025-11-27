@@ -86,7 +86,7 @@ def process_image(image_path: Path) -> Dict:
         
         # Check quality
         is_good_quality, quality_metrics = face_detector.check_face_quality(face)
-        quality_score = quality_metrics.get('sharpness', 0.0)
+        quality_score = quality_metrics.get('quality_score', 0.0)
         
         if quality_score < 0.60:
             return {

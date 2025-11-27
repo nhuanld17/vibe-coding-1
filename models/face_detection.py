@@ -376,7 +376,15 @@ class FaceDetector:
                 'contrast': float(contrast),
                 'is_sharp': is_sharp,
                 'is_bright_enough': is_bright_enough,
-                'is_contrasted': is_contrasted
+                'is_contrasted': is_contrasted,
+                'quality_score': self._compute_quality_score(
+                    sharpness=float(sharpness),
+                    brightness=float(brightness),
+                    contrast=float(contrast),
+                    is_sharp=is_sharp,
+                    is_bright_enough=is_bright_enough,
+                    is_contrasted=is_contrasted
+                )
             }
             
             logger.debug(f"Face quality: {is_good_quality}, metrics: {quality_metrics}")
@@ -385,6 +393,57 @@ class FaceDetector:
         except Exception as e:
             logger.error(f"Face quality check failed: {str(e)}")
             raise RuntimeError(f"Face quality check failed: {str(e)}")
+
+    @staticmethod
+    def _clamp(value: float, minimum: float = 0.0, maximum: float = 1.0) -> float:
+        """Clamp a float to [minimum, maximum]."""
+        return max(minimum, min(maximum, value))
+
+    def _compute_quality_score(
+        self,
+        sharpness: float,
+        brightness: float,
+        contrast: float,
+        is_sharp: bool,
+        is_bright_enough: bool,
+        is_contrasted: bool
+    ) -> float:
+        """
+        Normalize raw sharpness/brightness/contrast measurements into a 0-1 score.
+        
+        Weighted mostly by sharpness but penalizes extreme brightness/contrast issues.
+        """
+        # Sharpness: Laplacian variance. 80 = blurry, >=600 excellent.
+        sharpness_score = self._clamp((sharpness - 80.0) / (600.0 - 80.0))
+
+        # Brightness: ideal 120-180, penalize extremes outside [40, 220]
+        if brightness <= 40.0 or brightness >= 220.0:
+            brightness_score = 0.0
+        elif 120.0 <= brightness <= 180.0:
+            brightness_score = 1.0
+        elif brightness < 120.0:
+            brightness_score = self._clamp((brightness - 40.0) / (120.0 - 40.0))
+        else:  # brightness > 180
+            brightness_score = self._clamp((220.0 - brightness) / (220.0 - 180.0))
+
+        # Contrast: 30 minimal acceptable, >=120 great
+        contrast_score = self._clamp((contrast - 30.0) / (120.0 - 30.0))
+
+        quality_score = (
+            0.6 * sharpness_score +
+            0.2 * brightness_score +
+            0.2 * contrast_score
+        )
+
+        penalty = 0.0
+        if not is_sharp:
+            penalty += 0.25
+        if not is_bright_enough:
+            penalty += 0.15
+        if not is_contrasted:
+            penalty += 0.10
+
+        return round(self._clamp(quality_score - penalty), 4)
 
 
 def load_image_from_path(image_path: str) -> np.ndarray:
