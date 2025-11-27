@@ -7,12 +7,22 @@ missing or found persons by their IDs.
 
 import time
 import numpy as np
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from loguru import logger
 
 from ..dependencies import VectorDBDep, ConfidenceScoringDep, SettingsDep, BilateralSearchDep
-from ..schemas.models import SearchResponse, SearchParameters, MatchResult, PersonRecord, ConfidenceExplanation, ConfidenceFactor, AllCasesResponse, CaseRecord
+from ..schemas.models import (
+    SearchResponse,
+    SearchParameters,
+    MatchResult,
+    PersonRecord,
+    PersonImage,
+    ConfidenceExplanation,
+    ConfidenceFactor,
+    AllCasesResponse,
+    CaseRecord
+)
 from utils.validation import validate_search_parameters
 from .upload import format_match_results
 
@@ -100,6 +110,7 @@ async def get_all_cases(
                 logger.warning(f"Failed to fetch found persons: {str(e)}")
         
         processing_time = (time.time() - start_time) * 1000
+        logger.info(f"[STEP 7] search_missing_person completed | duration_ms={processing_time:.2f} | matches={len(matches)}")
         
         logger.info(f"Retrieved {len(cases)} cases ({missing_count} missing, {found_count} found) in {processing_time:.2f}ms")
         
@@ -120,7 +131,7 @@ async def get_all_cases(
         )
 
 
-def format_person_record(point_data: dict) -> PersonRecord:
+def format_person_record(point_data: dict, images: Optional[list] = None, primary_image_url: Optional[str] = None) -> PersonRecord:
     """Format a person record (the queried person, not a match)."""
     try:
         payload = point_data['payload']
@@ -128,20 +139,51 @@ def format_person_record(point_data: dict) -> PersonRecord:
         # Extract contact information
         contact = payload.get('contact') or payload.get('finder_contact', 'No contact available')
         
-        # Extract image_url from payload (if available)
-        image_url = payload.get('image_url')
+        # Extract image_url from payload (if available) or provided override
+        image_url = primary_image_url or payload.get('image_url')
         
         # Create person record (no similarity/confidence scores since this is the original record)
         return PersonRecord(
             id=point_data['id'],
             contact=contact,
             metadata=payload,
-            image_url=image_url
+            image_url=image_url,
+            images=images or []
         )
         
     except Exception as e:
         logger.error(f"Failed to format person record: {str(e)}")
         raise
+
+
+def build_person_images(points: list) -> List[PersonImage]:
+    """Convert raw Qdrant points into PersonImage entries sorted by image_index."""
+    images: list[PersonImage] = []
+    for point in points:
+        payload = point.get('payload', {}) or {}
+        try:
+            images.append(
+                PersonImage(
+                    point_id=str(point.get('id')),
+                    image_id=payload.get('image_id'),
+                    image_index=payload.get('image_index'),
+                    image_url=payload.get('image_url'),
+                    is_valid_for_matching=payload.get('is_valid_for_matching', True),
+                    validation_status=payload.get('validation_status', 'valid'),
+                    validation_details=payload.get('validation_details', {}),
+                    age_at_photo=payload.get('age_at_photo'),
+                    photo_year=payload.get('photo_year'),
+                    quality_score=payload.get('photo_quality_score'),
+                    upload_timestamp=payload.get('upload_timestamp')
+                )
+            )
+        except Exception as e:
+            logger.warning(f"Failed to parse person image payload {payload.get('image_id')}: {e}")
+            continue
+    
+    # Sort by image_index to maintain upload order
+    images.sort(key=lambda img: img.image_index if img.image_index is not None else 999)
+    return images
 
 
 @router.get("/missing/{case_id}", response_model=SearchResponse)
@@ -151,7 +193,7 @@ async def search_missing_person(
     bilateral_search: BilateralSearchDep,
     confidence_scoring: ConfidenceScoringDep,
     settings: SettingsDep,
-    limit: int = Query(default=1, ge=1, le=100, description="Maximum number of results"),
+    limit: int = Query(default=10, ge=1, le=100, description="Maximum number of results (top-K)"),
     include_similar: bool = Query(default=False, description="Include similar records")
 ):
     """
@@ -171,9 +213,10 @@ async def search_missing_person(
     start_time = time.time()
     
     try:
-        logger.info(f"Searching for missing person with case_id: {case_id}")
+        logger.info(f"[STEP 1] search_missing_person request received | case_id={case_id}")
         
         # Search for records with matching case_id using metadata search
+        logger.info("[STEP 2] Searching missing_persons metadata in Qdrant")
         search_results = vector_db.search_by_metadata(
             collection_name="missing_persons",
             filters={'case_id': case_id},
@@ -187,6 +230,7 @@ async def search_missing_person(
             )
         
         # Get full point data for the missing person
+        logger.info("[STEP 3] Fetching full point data for missing person")
         missing_person_data = None
         for result in search_results:
             try:
@@ -204,10 +248,33 @@ async def search_missing_person(
                 detail=f"Missing person with case_id '{case_id}' not found"
             )
         
+        # Retrieve all images for gallery view
+        logger.info("[STEP 4] Retrieving gallery images for missing person")
+        person_images = []
+        primary_image_url = missing_person_data['payload'].get('image_url')
+        case_id_value = missing_person_data['payload'].get('case_id')
+        if case_id_value:
+            try:
+                raw_images = vector_db.get_all_images_for_person("missing_persons", case_id_value)
+                person_images = build_person_images(raw_images)
+                # Prefer first image that has a URL for primary display
+                for img in person_images:
+                    if img.image_url:
+                        primary_image_url = img.image_url
+                        break
+            except Exception as e:
+                logger.warning(f"Failed to load gallery images for {case_id_value}: {e}")
+        
         # Format the missing person record (just for reference, not as a match)
-        missing_person_result = format_person_record(missing_person_data)
+        logger.info("[STEP 5] Formatting missing person record for response")
+        missing_person_result = format_person_record(
+            missing_person_data,
+            images=person_images,
+            primary_image_url=primary_image_url
+        )
         
         # Search for potential matches in found_persons collection
+        logger.info("[STEP 6] Searching for potential matches in found_persons")
         matches = []
         try:
             # Get embedding and metadata from missing person
@@ -226,7 +293,7 @@ async def search_missing_person(
                 
                 # Format the potential matches
                 matches = format_match_results(found_matches, confidence_scoring)
-                logger.info(f"Found {len(matches)} potential matches in found_persons")
+                logger.info(f"[STEP 6] Found {len(matches)} potential matches in found_persons")
                 
             else:
                 logger.warning(f"Missing person {case_id} has no embedding vector, cannot search for matches")
@@ -280,7 +347,7 @@ async def search_found_person(
     bilateral_search: BilateralSearchDep,
     confidence_scoring: ConfidenceScoringDep,
     settings: SettingsDep,
-    limit: int = Query(default=1, ge=1, le=100, description="Maximum number of results"),
+    limit: int = Query(default=10, ge=1, le=100, description="Maximum number of results (top-K)"),
     include_similar: bool = Query(default=False, description="Include similar records")
 ):
     """
@@ -333,8 +400,27 @@ async def search_found_person(
                 detail=f"Found person with found_id '{found_id}' not found"
             )
         
+        # Retrieve all images for the found person gallery
+        person_images = []
+        primary_image_url = found_person_data['payload'].get('image_url')
+        found_case_id = found_person_data['payload'].get('found_id') or found_person_data['payload'].get('case_id')
+        if found_case_id:
+            try:
+                raw_images = vector_db.get_all_images_for_person("found_persons", found_case_id)
+                person_images = build_person_images(raw_images)
+                for img in person_images:
+                    if img.image_url:
+                        primary_image_url = img.image_url
+                        break
+            except Exception as e:
+                logger.warning(f"Failed to load gallery images for found {found_case_id}: {e}")
+        
         # Format the found person record (just for reference, not as a match)
-        found_person_result = format_person_record(found_person_data)
+        found_person_result = format_person_record(
+            found_person_data,
+            images=person_images,
+            primary_image_url=primary_image_url
+        )
         
         # Search for potential matches in missing_persons collection
         matches = []

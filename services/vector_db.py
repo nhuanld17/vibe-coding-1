@@ -6,6 +6,7 @@ face embeddings with metadata using Qdrant vector database.
 """
 
 import uuid
+import time
 import numpy as np
 from typing import List, Dict, Optional, Any, Union
 from datetime import datetime
@@ -286,7 +287,8 @@ class VectorDatabaseService:
         collection_name: str,
         limit: int = 10,
         score_threshold: float = 0.65,
-        filters: Optional[Dict[str, Any]] = None
+        filters: Optional[Dict[str, Any]] = None,
+        with_vectors: bool = False
     ) -> List[Dict[str, Any]]:
         """
         Search for similar faces in the specified collection.
@@ -297,9 +299,10 @@ class VectorDatabaseService:
             limit: Maximum number of results to return
             score_threshold: Minimum similarity score (0-1)
             filters: Optional metadata filters
+            with_vectors: If True, include embedding vectors in results (needed for multi-image aggregation)
             
         Returns:
-            List of matching results with scores and metadata
+            List of matching results with scores and metadata (and optionally vectors)
             
         Raises:
             ValueError: If query_embedding has wrong shape
@@ -310,7 +313,8 @@ class VectorDatabaseService:
             ...     embedding,
             ...     "missing_persons",
             ...     limit=5,
-            ...     filters={'gender': 'male', 'age_range': [20, 40]}
+            ...     filters={'gender': 'male', 'age_range': [20, 40]},
+            ...     with_vectors=True  # Include vectors for multi-image aggregation
             ... )
         """
         try:
@@ -362,13 +366,18 @@ class VectorDatabaseService:
             
             # Perform search
             from qdrant_client.models import SearchRequest
+            start_time = time.time()
+            logger.info(f"[QdrantSearch] collection={collection_name} limit={limit} threshold={score_threshold} with_vectors={with_vectors}")
             search_results = self.client.query_points(
                 collection_name=collection_name,
                 query=query_embedding.tolist(),
                 query_filter=search_filter,
                 limit=limit,
-                score_threshold=score_threshold
+                score_threshold=score_threshold,
+                with_vectors=with_vectors  # Pass through with_vectors parameter
             ).points
+            elapsed_ms = (time.time() - start_time) * 1000
+            logger.info(f"[QdrantSearch] completed in {elapsed_ms:.2f}ms | results={len(search_results)}")
             
             # Format results
             results = []
@@ -378,6 +387,11 @@ class VectorDatabaseService:
                     'score': result.score,
                     'payload': result.payload
                 }
+                
+                # Include vector if requested (needed for multi-image aggregation)
+                if with_vectors and hasattr(result, 'vector') and result.vector is not None:
+                    result_dict['vector'] = result.vector
+                
                 results.append(result_dict)
             
             logger.debug(f"Found {len(results)} similar faces in {collection_name}")
@@ -642,6 +656,235 @@ class VectorDatabaseService:
         except Exception as e:
             logger.error(f"Failed to update point {point_id}: {str(e)}")
             raise RuntimeError(f"Update failed: {str(e)}")
+    
+    def insert_batch(
+        self,
+        collection_name: str,
+        embeddings: List[Optional[np.ndarray]],
+        payloads: List[Dict[str, Any]],
+        point_ids: Optional[List[str]] = None
+    ) -> List[str]:
+        """
+        Insert multiple embeddings in a single batch operation.
+        
+        UPDATED: Now handles None embeddings for reference-only images.
+        Reference images (embedding=None) are stored with metadata only.
+        
+        Args:
+            collection_name: Name of the collection ('missing_persons' or 'found_persons')
+            embeddings: List of 512-D face embeddings (may contain None for reference images)
+            payloads: List of metadata dictionaries (one per embedding)
+            point_ids: Optional list of point IDs (auto-generated if None)
+            
+        Returns:
+            List of point IDs for the inserted records
+            
+        Raises:
+            ValueError: If inputs are invalid or mismatched lengths
+            RuntimeError: If batch insertion fails
+            
+        Example:
+            >>> embeddings = [emb1, None, emb3]  # Image 2 is reference-only
+            >>> payloads = [
+            ...     {'case_id': 'MISS_001', 'is_valid_for_matching': True, ...},
+            ...     {'case_id': 'MISS_001', 'is_valid_for_matching': False, ...},  # Reference
+            ...     {'case_id': 'MISS_001', 'is_valid_for_matching': True, ...}
+            ... ]
+            >>> point_ids = db.insert_batch('missing_persons', embeddings, payloads)
+        """
+        try:
+            # Validate inputs
+            if not embeddings or not payloads:
+                raise ValueError("embeddings and payloads cannot be empty")
+            
+            if len(embeddings) != len(payloads):
+                raise ValueError(
+                    f"Length mismatch: {len(embeddings)} embeddings vs {len(payloads)} payloads"
+                )
+            
+            if point_ids is not None and len(point_ids) != len(embeddings):
+                raise ValueError(
+                    f"Length mismatch: {len(point_ids)} point_ids vs {len(embeddings)} embeddings"
+                )
+            
+            # Validate collection name
+            if collection_name not in [self.missing_collection, self.found_collection]:
+                raise ValueError(f"Invalid collection name: {collection_name}")
+            
+            # Generate point IDs if not provided
+            if point_ids is None:
+                point_ids = [str(uuid.uuid4()) for _ in range(len(embeddings))]
+            
+            # ═══════════════════════════════════════════════════════════════════
+            # NEW: Handle None embeddings (reference-only images)
+            # ═══════════════════════════════════════════════════════════════════
+            valid_points = []  # Points with embeddings
+            reference_points = []  # Points without embeddings (metadata only)
+            
+            for idx, (embedding, payload) in enumerate(zip(embeddings, payloads)):
+                # Add system metadata
+                enhanced_payload = payload.copy()
+                if 'upload_timestamp' not in enhanced_payload:
+                    enhanced_payload['upload_timestamp'] = datetime.utcnow().isoformat()
+                enhanced_payload['point_id'] = point_ids[idx]
+                
+                # Check if embedding is None (reference image)
+                if embedding is None:
+                    # Reference-only image - store metadata with dummy zero vector
+                    logger.debug(f"Point {point_ids[idx]}: Reference image (no embedding), using zero vector")
+                    reference_points.append(
+                        PointStruct(
+                            id=point_ids[idx],
+                            vector=np.zeros(512).tolist(),  # Dummy zero vector
+                            payload=enhanced_payload
+                        )
+                    )
+                else:
+                    # Validate embedding
+                    if len(embedding) != 512:
+                        raise ValueError(
+                            f"Embedding at index {idx} has invalid shape: {embedding.shape}"
+                        )
+                    
+                    # Valid image with embedding
+                    valid_points.append(
+                        PointStruct(
+                            id=point_ids[idx],
+                            vector=embedding.tolist(),
+                            payload=enhanced_payload
+                        )
+                    )
+            
+            # Batch insert all points (valid + reference)
+            all_points = valid_points + reference_points
+            
+            if all_points:
+                self.client.upsert(
+                    collection_name=collection_name,
+                    points=all_points
+                )
+                
+                logger.info(
+                    f"Batch inserted {len(all_points)} records to {collection_name}: "
+                    f"{len(valid_points)} valid, {len(reference_points)} reference. "
+                    f"Case: {payloads[0].get('case_id') or payloads[0].get('found_id', 'unknown')}"
+                )
+            
+            return point_ids
+            
+        except Exception as e:
+            logger.error(f"Batch insertion failed: {str(e)}")
+            raise RuntimeError(f"Batch insertion failed: {str(e)}")
+    
+    def get_all_images_for_person(
+        self,
+        collection_name: str,
+        case_id: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all images/points for a specific person.
+        
+        Args:
+            collection_name: Name of the collection
+            case_id: Case ID or Found ID of the person
+            
+        Returns:
+            List of image dictionaries with id, vector, and payload
+            
+        Raises:
+            ValueError: If collection name is invalid
+            RuntimeError: If retrieval fails
+            
+        Example:
+            >>> images = db.get_all_images_for_person('missing_persons', 'MISS_001')
+            >>> print(f"Person has {len(images)} images")
+            >>> for img in images:
+            ...     print(f"  - {img['payload']['image_id']} at age {img['payload']['age_at_photo']}")
+        """
+        try:
+            # Validate collection name
+            if collection_name not in [self.missing_collection, self.found_collection]:
+                raise ValueError(f"Invalid collection name: {collection_name}")
+            
+            # Build filter for case_id
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            
+            scroll_filter = Filter(
+                must=[FieldCondition(key="case_id", match=MatchValue(value=case_id))]
+            )
+            
+            # Scroll through all matching points
+            results = self.client.scroll(
+                collection_name=collection_name,
+                scroll_filter=scroll_filter,
+                limit=100,  # Should be enough for max 10 images per person
+                with_payload=True,
+                with_vectors=True
+            )
+            
+            # Format results
+            images = []
+            for point in results[0]:  # scroll returns (points, next_page_offset)
+                images.append({
+                    'id': str(point.id),
+                    'vector': point.vector,
+                    'payload': point.payload
+                })
+            
+            logger.debug(f"Retrieved {len(images)} images for person {case_id}")
+            return images
+            
+        except Exception as e:
+            logger.error(f"Failed to get images for person {case_id}: {str(e)}")
+            raise RuntimeError(f"Retrieval failed: {str(e)}")
+    
+    def delete_person(
+        self,
+        collection_name: str,
+        case_id: str
+    ) -> bool:
+        """
+        Delete ALL images for a specific person.
+        
+        Args:
+            collection_name: Name of the collection
+            case_id: Case ID or Found ID of the person
+            
+        Returns:
+            True if deletion was successful
+            
+        Raises:
+            ValueError: If collection name is invalid
+            RuntimeError: If deletion fails
+            
+        Example:
+            >>> db.delete_person('missing_persons', 'MISS_001')
+            >>> print("All images for MISS_001 deleted")
+        """
+        try:
+            # Validate collection name
+            if collection_name not in [self.missing_collection, self.found_collection]:
+                raise ValueError(f"Invalid collection name: {collection_name}")
+            
+            # Build filter for case_id
+            from qdrant_client.models import Filter, FieldCondition, MatchValue, FilterSelector
+            
+            delete_filter = Filter(
+                must=[FieldCondition(key="case_id", match=MatchValue(value=case_id))]
+            )
+            
+            # Delete all points matching the filter
+            self.client.delete(
+                collection_name=collection_name,
+                points_selector=FilterSelector(filter=delete_filter)
+            )
+            
+            logger.info(f"Deleted all images for person {case_id} from {collection_name}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to delete person {case_id}: {str(e)}")
+            raise RuntimeError(f"Deletion failed: {str(e)}")
     
     def health_check(self) -> Dict[str, Any]:
         """

@@ -23,6 +23,7 @@ MANIFEST
 
 # Virtual Environment
 venv/
+venv_test/
 env/
 ENV/
 .venv/

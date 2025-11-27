@@ -35,7 +35,12 @@ class BilateralSearchService:
         age_tolerance: int = 5,
         initial_search_threshold: float = 0.60,
         combined_score_threshold: float = 0.55,
-        face_metadata_fallback_threshold: float = 0.50
+        face_metadata_fallback_threshold: float = 0.50,
+        age_gap_threshold_enabled: bool = True,
+        age_gap_threshold_small: float = 0.35,
+        age_gap_threshold_medium: float = 0.45,
+        age_gap_threshold_large: float = 0.55,
+        age_gap_threshold_very_large: float = 0.65
     ) -> None:
         """
         Initialize the bilateral search service.
@@ -62,6 +67,11 @@ class BilateralSearchService:
         self.initial_search_threshold = initial_search_threshold
         self.combined_score_threshold = combined_score_threshold
         self.face_metadata_fallback_threshold = face_metadata_fallback_threshold
+        self.age_gap_threshold_enabled = age_gap_threshold_enabled
+        self.age_gap_threshold_small = age_gap_threshold_small
+        self.age_gap_threshold_medium = age_gap_threshold_medium
+        self.age_gap_threshold_large = age_gap_threshold_large
+        self.age_gap_threshold_very_large = age_gap_threshold_very_large
         
         logger.info(f"Bilateral search initialized with:")
         logger.info(f"  face_threshold_adult={self.face_threshold_adult}, face_threshold_child={self.face_threshold_child}")
@@ -115,32 +125,26 @@ class BilateralSearchService:
                 vector_matches, found_metadata, 'missing'
             )
             
-            # Filter by minimum combined score or face similarity (more lenient)
-            # Accept matches with good face similarity OR good combined score OR decent face similarity with good metadata
-            # BUT reject suspicious false positives (high face similarity but very low metadata similarity)
-            # NOTE: This is a human-in-the-loop system - we return ranked candidates for review, not hard yes/no decisions
-            # Use age-appropriate threshold for each candidate
-            filtered_matches = []
-            for m in reranked_matches:
-                # Validate match first (rejects suspicious false positives, especially for children)
-                if self._validate_match(m):
-                    # Get age-appropriate threshold for the matched person
-                    match_metadata = m.get('payload', {})
-                    threshold_for_match = self._get_face_threshold_for_person(match_metadata)
-                    
-                    if ((m['face_similarity'] >= threshold_for_match) or 
-                        (m['combined_score'] >= self.combined_score_threshold) or
-                        (m['face_similarity'] >= self.face_metadata_fallback_threshold and m['metadata_similarity'] >= 0.60)):
-                        filtered_matches.append(m)
+            ordered_matches = sorted(
+                reranked_matches,
+                key=lambda m: m.get('combined_score', m.get('face_similarity', 0.0)),
+                reverse=True
+            )
+            validated_matches = [m for m in ordered_matches if self._validate_match(m)]
+            final_pool = validated_matches if validated_matches else ordered_matches
+            top_k_matches = final_pool[:limit]
             
-            logger.info(f"After filtering: {len(filtered_matches)} matches (from {len(reranked_matches)} reranked)")
-            
-            # Limit results to top-k for human review
-            # This is intentionally NOT a hard yes/no decision - all candidates need human verification
-            final_matches = filtered_matches[:limit]
-            
-            logger.info(f"Found {len(final_matches)} potential missing person matches")
-            return final_matches
+            logger.info(
+                f"Returning {len(top_k_matches)} top missing-person candidates "
+                f"(limit={limit}, total_candidates={len(ordered_matches)})"
+            )
+            return top_k_matches
+
+
+
+
+
+
             
         except Exception as e:
             logger.error(f"Search for missing persons failed: {str(e)}")
@@ -193,31 +197,22 @@ class BilateralSearchService:
                 vector_matches, missing_metadata, 'found'
             )
             
-            # Filter by minimum combined score or face similarity (more lenient)
-            # Accept matches with good face similarity OR good combined score OR decent face similarity with good metadata
-            # BUT reject suspicious false positives (high face similarity but very low metadata similarity)
-            # NOTE: This is a human-in-the-loop system - we return ranked candidates for review, not hard yes/no decisions
-            # Use age-appropriate threshold for each candidate
-            filtered_matches = []
-            for m in reranked_matches:
-                if self._validate_match(m):
-                    # Get age-appropriate threshold for the matched person
-                    match_metadata = m.get('payload', {})
-                    threshold_for_match = self._get_face_threshold_for_person(match_metadata)
-                    
-                    if (m['face_similarity'] >= threshold_for_match) or \
-                       (m['combined_score'] >= self.combined_score_threshold) or \
-                       (m['face_similarity'] >= self.face_metadata_fallback_threshold and m['metadata_similarity'] >= 0.60):
-                        filtered_matches.append(m)
+            ordered_matches = sorted(
+                reranked_matches,
+                key=lambda m: m.get('combined_score', m.get('face_similarity', 0.0)),
+                reverse=True
+            )
+            validated_matches = [m for m in ordered_matches if self._validate_match(m)]
+            final_pool = validated_matches if validated_matches else ordered_matches
+            top_k_matches = final_pool[:limit]
             
-            logger.info(f"After filtering: {len(filtered_matches)} matches (from {len(reranked_matches)} reranked)")
-            
-            # Limit results to top-k for human review
-            # This is intentionally NOT a hard yes/no decision - all candidates need human verification
-            final_matches = filtered_matches[:limit]
-            
-            logger.info(f"Found {len(final_matches)} potential found person matches")
-            return final_matches
+            logger.info(
+                f"Returning {len(top_k_matches)} top found-person candidates "
+                f"(limit={limit}, total_candidates={len(ordered_matches)})"
+            )
+            return top_k_matches
+
+
             
         except Exception as e:
             logger.error(f"Search for found persons failed: {str(e)}")
@@ -487,6 +482,42 @@ class BilateralSearchService:
             return self.face_threshold_child
         else:
             return self.face_threshold_adult
+    
+    def _get_threshold_for_age_gap(
+        self,
+        age_gap: Optional[int],
+        match_metadata: Optional[Dict[str, Any]] = None
+    ) -> float:
+        """
+        Determine similarity threshold based on image pair age gap.
+        
+        Args:
+            age_gap: Age difference in years between best-matching photos
+            match_metadata: Matched person's metadata for fallback threshold
+            
+        Returns:
+            Similarity threshold value (0-1)
+        """
+        if not self.age_gap_threshold_enabled or age_gap is None:
+            return self._get_face_threshold_for_person(match_metadata or {})
+        
+        try:
+            if age_gap <= 3:
+                threshold = self.age_gap_threshold_small
+            elif age_gap <= 7:
+                threshold = self.age_gap_threshold_medium
+            elif age_gap <= 15:
+                threshold = self.age_gap_threshold_large
+            else:
+                threshold = self.age_gap_threshold_very_large
+            
+            logger.debug(
+                f"Age-gap threshold: gap={age_gap}y -> threshold={threshold:.3f}"
+            )
+            return threshold
+        except Exception as e:
+            logger.warning(f"Failed to compute age-gap threshold (gap={age_gap}): {e}")
+            return self._get_face_threshold_for_person(match_metadata or {})
     
     def _check_age_consistency(
         self,
@@ -762,6 +793,336 @@ class BilateralSearchService:
             details['match_current_age'] = match_metadata.get('current_age_estimate')
         
         return details
+    
+    # ========================================================================
+    # MULTI-IMAGE SEARCH METHODS
+    # ========================================================================
+    
+    def _get_primary_embedding(self, query_embeddings: List[Dict[str, Any]]) -> np.ndarray:
+        """
+        Get best quality embedding for initial search.
+        
+        Args:
+            query_embeddings: List of dicts with 'embedding', 'age_at_photo', 'quality'
+            
+        Returns:
+            Best quality embedding as numpy array
+        """
+        if len(query_embeddings) == 1:
+            return query_embeddings[0]['embedding']
+        
+        # Sort by quality, return highest
+        best = max(query_embeddings, key=lambda x: x.get('quality', 0.5))
+        return best['embedding']
+    
+    def search_for_found_multi_image(
+        self,
+        query_embeddings: List[Dict[str, Any]],
+        query_metadata: Dict[str, Any],
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for found persons using multiple query images.
+        
+        This method implements multi-image search with aggregation:
+        1. Stage 1: Qdrant search with primary (best quality) embedding
+        2. Stage 2: Group results by found_id
+        3. Stage 3: Aggregate scores per person using multi_image_aggregation
+        4. Stage 4: Sort, validate, and return top-k persons
+        
+        Args:
+            query_embeddings: List of dicts with:
+                - 'embedding': np.ndarray (512-D)
+                - 'age_at_photo': int
+                - 'quality': float (0-1)
+            query_metadata: Shared metadata for query person
+            limit: Number of persons to return
+            
+        Returns:
+            List of matches with aggregated scores
+            
+        Example:
+            >>> query_embeddings = [
+            ...     {"embedding": emb1, "age_at_photo": 8, "quality": 0.9},
+            ...     {"embedding": emb2, "age_at_photo": 15, "quality": 0.85}
+            ... ]
+            >>> matches = search.search_for_found_multi_image(query_embeddings, metadata, limit=10)
+        """
+        from services.multi_image_aggregation import get_aggregation_service
+        from collections import defaultdict
+        
+        try:
+            logger.info(f"Multi-image search: {len(query_embeddings)} query images")
+            
+            # Stage 1: Qdrant search with primary embedding
+            primary_embedding = self._get_primary_embedding(query_embeddings)
+            
+            # Inflate limit to account for multiple images per person
+            # Assumption: avg 5 images per person
+            inflated_limit = limit * 10
+            
+            logger.info(f"Stage 1: Searching with inflated limit={inflated_limit}")
+            vector_matches = self.vector_db.search_similar_faces(
+                query_embedding=primary_embedding,
+                collection_name="found_persons",
+                limit=inflated_limit,
+                score_threshold=self.initial_search_threshold,
+                filters={"is_valid_for_matching": True},  # ← FILTER: Only valid images
+                with_vectors=True  # ← CRITICAL: retrieve embeddings for aggregation
+            )
+            
+            logger.info(f"Stage 1: Retrieved {len(vector_matches)} points from Qdrant")
+            
+            # Stage 2: Group by found_id
+            persons = defaultdict(list)
+            for match in vector_matches:
+                found_id = match['payload'].get('found_id') or match['payload'].get('case_id')
+                if found_id:
+                    persons[found_id].append(match)
+            
+            logger.info(f"Stage 2: Grouped into {len(persons)} unique persons")
+            
+            # Stage 3: Aggregate scores per person
+            aggregation_service = get_aggregation_service()
+            aggregated_results = []
+            
+            for found_id, person_points in persons.items():
+                # Build candidate images list
+                candidate_images = []
+                for point in person_points:
+                    if 'vector' not in point:
+                        logger.warning(f"Point {point['id']} missing vector, skipping")
+                        continue
+                    
+                    candidate_images.append({
+                        'image_id': point['payload'].get('image_id', point['id']),
+                        'embedding': np.array(point['vector']),
+                        'age_at_photo': point['payload'].get('age_at_photo'),  # None if missing
+                        'case_id': found_id
+                    })
+                
+                if not candidate_images:
+                    continue
+                
+                # Aggregate similarity using multi_image_aggregation service
+                try:
+                    agg_result = aggregation_service.aggregate_multi_image_similarity(
+                        query_images=[{
+                            'image_id': f"query_{i}",
+                            'embedding': q['embedding'],
+                            'age_at_photo': q['age_at_photo'],
+                            'case_id': 'query'
+                        } for i, q in enumerate(query_embeddings)],
+                        target_images=candidate_images
+                    )
+                    
+                    # Calculate metadata similarity
+                    metadata_sim = self._calculate_metadata_similarity(
+                        query_metadata,
+                        person_points[0]['payload'],
+                        'found'
+                    )
+                    
+                    # Combined score (face + metadata)
+                    face_sim = agg_result.best_similarity
+                    combined_score = (self.face_weight * face_sim + 
+                                     self.metadata_weight * metadata_sim)
+                    
+                    aggregated_results.append({
+                        'id': found_id,
+                        'case_id': found_id,
+                        'face_similarity': face_sim,
+                        'metadata_similarity': metadata_sim,
+                        'combined_score': combined_score,
+                        'payload': person_points[0]['payload'],
+                        'multi_image_details': {
+                            'total_query_images': len(query_embeddings),
+                            'total_candidate_images': len(candidate_images),
+                            'num_comparisons': len(agg_result.all_pair_scores),
+                            'best_similarity': agg_result.best_similarity,
+                            'mean_similarity': agg_result.mean_similarity,
+                            'consistency_score': agg_result.consistency_score,
+                            'num_good_matches': agg_result.num_good_matches,
+                            'best_age_gap': agg_result.best_age_gap
+                        },
+                        'best_age_gap': agg_result.best_age_gap,
+                        'num_candidate_images': len(candidate_images)
+                    })
+                    
+                except Exception as e:
+                    logger.error(f"Aggregation failed for {found_id}: {e}")
+                    continue
+            
+            # Stage 4: Sort and validate
+            aggregated_results.sort(key=lambda x: x['combined_score'], reverse=True)
+            
+            for result in aggregated_results:
+                age_gap = result.get('best_age_gap')
+                match_metadata = result.get('payload', {})
+                threshold = self._get_threshold_for_age_gap(age_gap, match_metadata)
+                result['threshold_used'] = threshold
+                result['multi_image_details']['threshold_used'] = threshold
+            
+            validated = [r for r in aggregated_results if self._validate_match(r)]
+            final_pool = validated if validated else aggregated_results
+            final_results = final_pool[:limit]
+            
+            logger.info(
+                f"Stage 4: Returning {len(final_results)} persons (limit={limit}, total_aggregated={len(aggregated_results)})"
+            )
+            return final_results
+
+
+            
+        except Exception as e:
+            logger.error(f"Multi-image search for found persons failed: {str(e)}", exc_info=True)
+            raise RuntimeError(f"Multi-image search failed: {str(e)}")
+    
+    def search_for_missing_multi_image(
+        self,
+        query_embeddings: List[Dict[str, Any]],
+        query_metadata: Dict[str, Any],
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for missing persons using multiple query images.
+        
+        Symmetric to search_for_found_multi_image() but searches missing_persons collection.
+        
+        Args:
+            query_embeddings: List of dicts with 'embedding', 'age_at_photo', 'quality'
+            query_metadata: Shared metadata for query person
+            limit: Number of persons to return
+            
+        Returns:
+            List of matches with aggregated scores
+        """
+        from services.multi_image_aggregation import get_aggregation_service
+        from collections import defaultdict
+        
+        try:
+            logger.info(f"Multi-image search (missing): {len(query_embeddings)} query images")
+            
+            # Stage 1: Qdrant search with primary embedding
+            primary_embedding = self._get_primary_embedding(query_embeddings)
+            inflated_limit = limit * 10
+            
+            logger.info(f"Stage 1: Searching with inflated limit={inflated_limit}")
+            vector_matches = self.vector_db.search_similar_faces(
+                query_embedding=primary_embedding,
+                collection_name="missing_persons",
+                limit=inflated_limit,
+                score_threshold=self.initial_search_threshold,
+                filters={"is_valid_for_matching": True},  # ← FILTER: Only valid images
+                with_vectors=True
+            )
+            
+            logger.info(f"Stage 1: Retrieved {len(vector_matches)} points from Qdrant")
+            
+            # Stage 2: Group by case_id
+            persons = defaultdict(list)
+            for match in vector_matches:
+                case_id = match['payload'].get('case_id')
+                if case_id:
+                    persons[case_id].append(match)
+            
+            logger.info(f"Stage 2: Grouped into {len(persons)} unique persons")
+            
+            # Stage 3: Aggregate scores per person
+            aggregation_service = get_aggregation_service()
+            aggregated_results = []
+            
+            for case_id, person_points in persons.items():
+                # Build candidate images list
+                candidate_images = []
+                for point in person_points:
+                    if 'vector' not in point:
+                        logger.warning(f"Point {point['id']} missing vector, skipping")
+                        continue
+                    
+                    candidate_images.append({
+                        'image_id': point['payload'].get('image_id', point['id']),
+                        'embedding': np.array(point['vector']),
+                        'age_at_photo': point['payload'].get('age_at_photo'),  # None if missing
+                        'case_id': case_id
+                    })
+                
+                if not candidate_images:
+                    continue
+                
+                # Aggregate similarity
+                try:
+                    agg_result = aggregation_service.aggregate_multi_image_similarity(
+                        query_images=[{
+                            'image_id': f"query_{i}",
+                            'embedding': q['embedding'],
+                            'age_at_photo': q['age_at_photo'],
+                            'case_id': 'query'
+                        } for i, q in enumerate(query_embeddings)],
+                        target_images=candidate_images
+                    )
+                    
+                    # Calculate metadata similarity
+                    metadata_sim = self._calculate_metadata_similarity(
+                        query_metadata,
+                        person_points[0]['payload'],
+                        'missing'
+                    )
+                    
+                    # Combined score
+                    face_sim = agg_result.best_similarity
+                    combined_score = (self.face_weight * face_sim + 
+                                     self.metadata_weight * metadata_sim)
+                    
+                    aggregated_results.append({
+                        'id': case_id,
+                        'case_id': case_id,
+                        'face_similarity': face_sim,
+                        'metadata_similarity': metadata_sim,
+                        'combined_score': combined_score,
+                        'payload': person_points[0]['payload'],
+                        'multi_image_details': {
+                            'total_query_images': len(query_embeddings),
+                            'total_candidate_images': len(candidate_images),
+                            'num_comparisons': len(agg_result.all_pair_scores),
+                            'best_similarity': agg_result.best_similarity,
+                            'mean_similarity': agg_result.mean_similarity,
+                            'consistency_score': agg_result.consistency_score,
+                            'num_good_matches': agg_result.num_good_matches,
+                            'best_age_gap': agg_result.best_age_gap
+                        },
+                        'best_age_gap': agg_result.best_age_gap,
+                        'num_candidate_images': len(candidate_images)
+                    })
+                    
+                except Exception as e:
+                    logger.error(f"Aggregation failed for {case_id}: {e}")
+                    continue
+            
+            # Stage 4: Sort and validate
+            aggregated_results.sort(key=lambda x: x['combined_score'], reverse=True)
+            
+            for result in aggregated_results:
+                age_gap = result.get('best_age_gap')
+                match_metadata = result.get('payload', {})
+                threshold = self._get_threshold_for_age_gap(age_gap, match_metadata)
+                result['threshold_used'] = threshold
+                result['multi_image_details']['threshold_used'] = threshold
+            
+            validated = [r for r in aggregated_results if self._validate_match(r)]
+            final_pool = validated if validated else aggregated_results
+            final_results = final_pool[:limit]
+            
+            logger.info(
+                f"Stage 4: Returning {len(final_results)} persons (limit={limit}, total_aggregated={len(aggregated_results)})"
+            )
+            return final_results
+
+
+            
+        except Exception as e:
+            logger.error(f"Multi-image search for missing persons failed: {str(e)}", exc_info=True)
+            raise RuntimeError(f"Multi-image search failed: {str(e)}")
     
     def get_search_statistics(self) -> Dict[str, Any]:
         """Get statistics about the search service and database."""

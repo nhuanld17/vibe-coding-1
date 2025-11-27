@@ -132,7 +132,12 @@ def initialize_services(settings: Settings) -> None:
             metadata_weight=0.3,
             initial_search_threshold=settings.initial_search_threshold,
             combined_score_threshold=settings.combined_score_threshold,
-            face_metadata_fallback_threshold=settings.face_metadata_fallback_threshold
+            face_metadata_fallback_threshold=settings.face_metadata_fallback_threshold,
+            age_gap_threshold_enabled=settings.age_gap_threshold_enabled,
+            age_gap_threshold_small=settings.age_gap_threshold_small,
+            age_gap_threshold_medium=settings.age_gap_threshold_medium,
+            age_gap_threshold_large=settings.age_gap_threshold_large,
+            age_gap_threshold_very_large=settings.age_gap_threshold_very_large
         )
         logger.info("Bilateral search service initialized successfully")
         

@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     
     # Detection and Matching Thresholds
     face_confidence_threshold: float = Field(
-        default=0.70,
+        default=0.60,
         ge=0.0,
         le=1.0,
         description="Minimum confidence for face detection"
@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     # Note: Thresholds adjusted for InsightFace backend with age-progression datasets
     # Same-person similarity can be lower (0.4-0.6) for large age gaps
     initial_search_threshold: float = Field(
-        default=0.40,
+        default=0.0,  # Bỏ ngưỡng, luôn lấy top candidates
         ge=0.0,
         le=1.0,
         description="Initial Qdrant search threshold for face similarity (cosine similarity). Lowered for age-progression data."
@@ -95,6 +95,36 @@ class Settings(BaseSettings):
         ge=0.0,
         le=1.0,
         description="Minimum face similarity when metadata similarity is high (>=0.60). Allows matches with good metadata even if face similarity is lower."
+    )
+    
+    # Age gap thresholding for multi-image aggregation
+    age_gap_threshold_enabled: bool = Field(
+        default=True,
+        description="Enable dynamic similarity thresholds based on age gap between image pairs"
+    )
+    age_gap_threshold_small: float = Field(
+        default=0.35,
+        ge=0.1,
+        le=1.0,
+        description="Similarity threshold for small age gap (0-3 years)"
+    )
+    age_gap_threshold_medium: float = Field(
+        default=0.45,
+        ge=0.1,
+        le=1.0,
+        description="Similarity threshold for medium age gap (4-7 years)"
+    )
+    age_gap_threshold_large: float = Field(
+        default=0.55,
+        ge=0.1,
+        le=1.0,
+        description="Similarity threshold for large age gap (8-15 years)"
+    )
+    age_gap_threshold_very_large: float = Field(
+        default=0.50,
+        ge=0.1,
+        le=1.0,
+        description="Similarity threshold for very large age gap (16+ years). Lowered to surface more candidates for manual verification."
     )
     
     # Face Search Thresholds (for missing-person search)
