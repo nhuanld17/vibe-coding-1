@@ -956,6 +956,7 @@ async def upload_missing_person_batch(
             payloads=payloads
         )
         logger.info(f"✅ Inserted {len(point_ids)} records for case {case_id}")
+        primary_point_id = point_ids[0] if point_ids else None
         
         # ═══════════════════════════════════════════════════════════════════
         # Search ONLY with valid images (ignore reference images)
@@ -1000,6 +1001,8 @@ async def upload_missing_person_batch(
                    f" for '{name}'" +
                    (f" ({len(failed_images)} failed)" if failed_images else ""),
             case_id=case_id,
+            point_id=primary_point_id,
+            point_ids=point_ids,
             total_images_uploaded=len(all_images),
             total_images_failed=len(failed_images),
             
@@ -1045,6 +1048,32 @@ async def upload_missing_person_batch(
             f"({len(valid_images)} valid, {len(reference_images)} reference) "
             f"({processing_time:.1f}ms)"
         )
+        
+        # Send email notification similar to single upload (if SMTP configured)
+        if settings.smtp_enabled and settings.smtp_host and settings.smtp_user and settings.smtp_password and settings.smtp_from_email:
+            try:
+                email_image_url = None
+                for img in valid_images + reference_images:
+                    if img.get('image_url'):
+                        email_image_url = img['image_url']
+                        break
+                
+                send_missing_person_profile_email(
+                    smtp_host=settings.smtp_host,
+                    smtp_port=settings.smtp_port,
+                    smtp_user=settings.smtp_user,
+                    smtp_password=settings.smtp_password,
+                    from_email=settings.smtp_from_email,
+                    contact=contact,
+                    metadata=payloads[0] if payloads else {},
+                    case_id=case_id,
+                    image_url=email_image_url,
+                    use_tls=settings.smtp_use_tls
+                )
+                logger.info(f"Email notification sent for batch missing profile: {case_id}")
+            except Exception as e:
+                logger.error(f"Failed to send batch email notification: {e}")
+        
         return response
         
     except HTTPException:
@@ -1243,6 +1272,7 @@ async def upload_found_person_batch(
             payloads=payloads
         )
         logger.info(f"✅ Inserted {len(point_ids)} records for found {found_id}")
+        primary_point_id = point_ids[0] if point_ids else None
         
         # ═══════════════════════════════════════════════════════════════════
         # Search ONLY with valid images
@@ -1287,6 +1317,8 @@ async def upload_found_person_batch(
                    " for found person" +
                    (f" ({len(failed_images)} failed)" if failed_images else ""),
             case_id=found_id,
+            point_id=primary_point_id,
+            point_ids=point_ids,
             total_images_uploaded=len(all_images),
             total_images_failed=len(failed_images),
             
@@ -1332,6 +1364,31 @@ async def upload_found_person_batch(
             f"({len(valid_images)} valid, {len(reference_images)} reference) "
             f"({processing_time:.1f}ms)"
         )
+        
+        if settings.smtp_enabled and settings.smtp_host and settings.smtp_user and settings.smtp_password and settings.smtp_from_email:
+            try:
+                email_image_url = None
+                for img in valid_images + reference_images:
+                    if img.get('image_url'):
+                        email_image_url = img['image_url']
+                        break
+                
+                send_found_person_profile_email(
+                    smtp_host=settings.smtp_host,
+                    smtp_port=settings.smtp_port,
+                    smtp_user=settings.smtp_user,
+                    smtp_password=settings.smtp_password,
+                    from_email=settings.smtp_from_email,
+                    finder_contact=finder_contact,
+                    metadata=payloads[0] if payloads else {},
+                    found_id=found_id,
+                    image_url=email_image_url,
+                    use_tls=settings.smtp_use_tls
+                )
+                logger.info(f"Email notification sent for batch found profile: {found_id}")
+            except Exception as e:
+                logger.error(f"Failed to send batch email notification (found): {e}")
+        
         return response
         
     except HTTPException:

@@ -152,6 +152,31 @@ def process_image_set(image_paths: List[str]) -> Tuple[List[Dict], int, int]:
     return valid_images, reference_count, failed_count
 
 
+def _get_threshold_for_age_gap(age_gap: Optional[int]) -> float:
+    """Dynamic threshold mirroring production logic."""
+    if age_gap is None:
+        return 0.35
+    if age_gap <= 3:
+        return 0.35
+    if age_gap <= 7:
+        return 0.45
+    if age_gap <= 15:
+        return 0.55
+    return 0.65
+
+
+def _categorize_age_gap(age_gap: Optional[int]) -> str:
+    if age_gap is None:
+        return "unknown"
+    if age_gap <= 3:
+        return "small"
+    if age_gap <= 7:
+        return "medium"
+    if age_gap <= 15:
+        return "large"
+    return "very_large"
+
+
 def test_single_pair(pair: Dict) -> Dict:
     """
     Test a single pair from dataset.
@@ -260,10 +285,10 @@ def test_single_pair(pair: Dict) -> Dict:
             "notes": f"Aggregation error: {str(e)}"
         }
     
-    # Predict same/different based on threshold
-    # agg_result is AggregatedMatchResult object, access as attributes
-    THRESHOLD = 0.30  # Adjust based on your system
-    predicted_same = agg_result.best_similarity >= THRESHOLD
+    # Predict same/different based on dynamic age-gap threshold
+    age_gap = agg_result.best_age_gap
+    threshold = _get_threshold_for_age_gap(age_gap)
+    predicted_same = agg_result.best_similarity >= threshold
     prediction_correct = (predicted_same == is_same_person)
     
     return {
@@ -281,7 +306,9 @@ def test_single_pair(pair: Dict) -> Dict:
         "num_comparisons": len(agg_result.all_pair_scores),
         "predicted_same_person": predicted_same,
         "prediction_correct": prediction_correct,
-        "processing_time_ms": processing_time
+        "processing_time_ms": processing_time,
+        "best_age_gap": age_gap,
+        "threshold_used": threshold
     }
 
 
@@ -338,6 +365,8 @@ def run_comprehensive_test():
         "best_similarity", "mean_similarity", "consistency_score", "num_comparisons",
         "predicted_same_person", "prediction_correct",
         "processing_time_ms",
+        "best_age_gap",
+        "threshold_used",
         "notes"
     ]
     
@@ -347,6 +376,16 @@ def run_comprehensive_test():
         writer.writerows(results)
     
     logger.success(f"Results saved to {RESULTS_CSV}")
+
+    # Age gap distribution log
+    gap_distribution = {"small": 0, "medium": 0, "large": 0, "very_large": 0, "unknown": 0}
+    for r in results:
+        category = _categorize_age_gap(r.get("best_age_gap"))
+        if category not in gap_distribution:
+            gap_distribution["unknown"] += 1
+        else:
+            gap_distribution[category] += 1
+    logger.info(f"Age gap distribution (best pairs): {gap_distribution}")
     
     # Calculate metrics
     print("\n" + "="*70)
@@ -393,6 +432,9 @@ def run_comprehensive_test():
     print(f"\nPerformance:")
     print(f"  Total time: {total_time/60:.2f} minutes")
     print(f"  Avg per pair: {avg_processing:.2f}ms")
+    print(f"\nBest-pair age gap distribution (all pairs):")
+    for cat, count in gap_distribution.items():
+        print(f"  {cat:10s}: {count}")
     print("="*70)
 
 

@@ -6,6 +6,7 @@ face embeddings with metadata using Qdrant vector database.
 """
 
 import uuid
+import time
 import numpy as np
 from typing import List, Dict, Optional, Any, Union
 from datetime import datetime
@@ -365,6 +366,8 @@ class VectorDatabaseService:
             
             # Perform search
             from qdrant_client.models import SearchRequest
+            start_time = time.time()
+            logger.info(f"[QdrantSearch] collection={collection_name} limit={limit} threshold={score_threshold} with_vectors={with_vectors}")
             search_results = self.client.query_points(
                 collection_name=collection_name,
                 query=query_embedding.tolist(),
@@ -373,6 +376,8 @@ class VectorDatabaseService:
                 score_threshold=score_threshold,
                 with_vectors=with_vectors  # Pass through with_vectors parameter
             ).points
+            elapsed_ms = (time.time() - start_time) * 1000
+            logger.info(f"[QdrantSearch] completed in {elapsed_ms:.2f}ms | results={len(search_results)}")
             
             # Format results
             results = []

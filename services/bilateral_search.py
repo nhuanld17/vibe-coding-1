@@ -35,7 +35,12 @@ class BilateralSearchService:
         age_tolerance: int = 5,
         initial_search_threshold: float = 0.60,
         combined_score_threshold: float = 0.55,
-        face_metadata_fallback_threshold: float = 0.50
+        face_metadata_fallback_threshold: float = 0.50,
+        age_gap_threshold_enabled: bool = True,
+        age_gap_threshold_small: float = 0.35,
+        age_gap_threshold_medium: float = 0.45,
+        age_gap_threshold_large: float = 0.55,
+        age_gap_threshold_very_large: float = 0.65
     ) -> None:
         """
         Initialize the bilateral search service.
@@ -62,6 +67,11 @@ class BilateralSearchService:
         self.initial_search_threshold = initial_search_threshold
         self.combined_score_threshold = combined_score_threshold
         self.face_metadata_fallback_threshold = face_metadata_fallback_threshold
+        self.age_gap_threshold_enabled = age_gap_threshold_enabled
+        self.age_gap_threshold_small = age_gap_threshold_small
+        self.age_gap_threshold_medium = age_gap_threshold_medium
+        self.age_gap_threshold_large = age_gap_threshold_large
+        self.age_gap_threshold_very_large = age_gap_threshold_very_large
         
         logger.info(f"Bilateral search initialized with:")
         logger.info(f"  face_threshold_adult={self.face_threshold_adult}, face_threshold_child={self.face_threshold_child}")
@@ -488,6 +498,42 @@ class BilateralSearchService:
         else:
             return self.face_threshold_adult
     
+    def _get_threshold_for_age_gap(
+        self,
+        age_gap: Optional[int],
+        match_metadata: Optional[Dict[str, Any]] = None
+    ) -> float:
+        """
+        Determine similarity threshold based on image pair age gap.
+        
+        Args:
+            age_gap: Age difference in years between best-matching photos
+            match_metadata: Matched person's metadata for fallback threshold
+            
+        Returns:
+            Similarity threshold value (0-1)
+        """
+        if not self.age_gap_threshold_enabled or age_gap is None:
+            return self._get_face_threshold_for_person(match_metadata or {})
+        
+        try:
+            if age_gap <= 3:
+                threshold = self.age_gap_threshold_small
+            elif age_gap <= 7:
+                threshold = self.age_gap_threshold_medium
+            elif age_gap <= 15:
+                threshold = self.age_gap_threshold_large
+            else:
+                threshold = self.age_gap_threshold_very_large
+            
+            logger.debug(
+                f"Age-gap threshold: gap={age_gap}y -> threshold={threshold:.3f}"
+            )
+            return threshold
+        except Exception as e:
+            logger.warning(f"Failed to compute age-gap threshold (gap={age_gap}): {e}")
+            return self._get_face_threshold_for_person(match_metadata or {})
+    
     def _check_age_consistency(
         self,
         metadata1: Dict[str, Any],
@@ -899,6 +945,7 @@ class BilateralSearchService:
                     
                     aggregated_results.append({
                         'id': found_id,
+                        'case_id': found_id,
                         'face_similarity': face_sim,
                         'metadata_similarity': metadata_sim,
                         'combined_score': combined_score,
@@ -913,6 +960,7 @@ class BilateralSearchService:
                             'num_good_matches': agg_result.num_good_matches,
                             'best_age_gap': agg_result.best_age_gap
                         },
+                        'best_age_gap': agg_result.best_age_gap,
                         'num_candidate_images': len(candidate_images)
                     })
                     
@@ -922,7 +970,28 @@ class BilateralSearchService:
             
             # Stage 4: Sort and validate
             aggregated_results.sort(key=lambda x: x['combined_score'], reverse=True)
-            validated = [r for r in aggregated_results if self._validate_match(r)]
+            
+            filtered_by_threshold = []
+            for result in aggregated_results:
+                age_gap = result.get('best_age_gap')
+                match_metadata = result.get('payload', {})
+                threshold = self._get_threshold_for_age_gap(age_gap, match_metadata)
+                result['threshold_used'] = threshold
+                result['multi_image_details']['threshold_used'] = threshold
+                if (
+                    result['face_similarity'] >= threshold or
+                    result['combined_score'] >= self.combined_score_threshold or
+                    (result['face_similarity'] >= self.face_metadata_fallback_threshold and
+                     result['metadata_similarity'] >= 0.60)
+                ):
+                    filtered_by_threshold.append(result)
+                else:
+                    logger.debug(
+                        f"Multi-image match {result.get('id')} filtered by age-gap threshold "
+                        f"(face={result['face_similarity']:.3f}, threshold={threshold:.3f}, age_gap={age_gap})"
+                    )
+            
+            validated = [r for r in filtered_by_threshold if self._validate_match(r)]
             final_results = validated[:limit]
             
             logger.info(f"Stage 4: Returning {len(final_results)} persons (from {len(aggregated_results)} aggregated)")
@@ -1030,6 +1099,7 @@ class BilateralSearchService:
                     
                     aggregated_results.append({
                         'id': case_id,
+                        'case_id': case_id,
                         'face_similarity': face_sim,
                         'metadata_similarity': metadata_sim,
                         'combined_score': combined_score,
@@ -1044,6 +1114,7 @@ class BilateralSearchService:
                             'num_good_matches': agg_result.num_good_matches,
                             'best_age_gap': agg_result.best_age_gap
                         },
+                        'best_age_gap': agg_result.best_age_gap,
                         'num_candidate_images': len(candidate_images)
                     })
                     
@@ -1053,7 +1124,28 @@ class BilateralSearchService:
             
             # Stage 4: Sort and validate
             aggregated_results.sort(key=lambda x: x['combined_score'], reverse=True)
-            validated = [r for r in aggregated_results if self._validate_match(r)]
+            
+            filtered_by_threshold = []
+            for result in aggregated_results:
+                age_gap = result.get('best_age_gap')
+                match_metadata = result.get('payload', {})
+                threshold = self._get_threshold_for_age_gap(age_gap, match_metadata)
+                result['threshold_used'] = threshold
+                result['multi_image_details']['threshold_used'] = threshold
+                if (
+                    result['face_similarity'] >= threshold or
+                    result['combined_score'] >= self.combined_score_threshold or
+                    (result['face_similarity'] >= self.face_metadata_fallback_threshold and
+                     result['metadata_similarity'] >= 0.60)
+                ):
+                    filtered_by_threshold.append(result)
+                else:
+                    logger.debug(
+                        f"Multi-image match {result.get('id')} filtered by age-gap threshold "
+                        f"(face={result['face_similarity']:.3f}, threshold={threshold:.3f}, age_gap={age_gap})"
+                    )
+            
+            validated = [r for r in filtered_by_threshold if self._validate_match(r)]
             final_results = validated[:limit]
             
             logger.info(f"Stage 4: Returning {len(final_results)} persons (from {len(aggregated_results)} aggregated)")

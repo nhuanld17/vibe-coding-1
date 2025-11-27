@@ -178,6 +178,15 @@ class MultiImageUploadResponse(BaseModel):
     success: bool = Field(..., description="Overall upload success status")
     message: str = Field(..., description="Human-readable message")
     case_id: Optional[str] = Field(None, description="Case ID or Found ID for the person", example="MISS_001")
+    point_id: Optional[str] = Field(
+        None,
+        description="Primary point ID (first vector entry) for backward-compatible display",
+        example="2f1a4f0e-9c7e-4d4f-8e4c-9b1f0a5d2c3b"
+    )
+    point_ids: List[str] = Field(
+        default_factory=list,
+        description="List of point IDs created (one per image entry)"
+    )
     total_images_uploaded: int = Field(..., ge=0, description="Total images saved (valid + reference)")
     total_images_failed: int = Field(default=0, ge=0, description="Number of failed images (file errors)")
     
@@ -221,6 +230,25 @@ class MultiImageMatchDetails(BaseModel):
     age_gap_at_best_match: int = Field(..., ge=0, description="Age gap between best matching photos")
     age_bracket_match_found: bool = Field(..., description="Whether similar-age photos were found")
     num_good_matches: int = Field(..., ge=0, description="Number of pairs above good match threshold")
+    threshold_used: Optional[float] = Field(
+        None,
+        description="Dynamic similarity threshold applied based on age gap"
+    )
+
+
+class PersonImage(BaseModel):
+    """Image entry belonging to a person profile."""
+    point_id: str = Field(..., description="Unique point ID in Qdrant")
+    image_id: Optional[str] = Field(None, description="Image identifier (e.g., CASE_img_0)")
+    image_index: Optional[int] = Field(None, description="Index order in upload batch")
+    image_url: Optional[str] = Field(None, description="Cloudinary URL (if available)")
+    is_valid_for_matching: bool = Field(..., description="Whether this image was used for matching")
+    validation_status: str = Field(..., description="Validation status (valid, no_face_detected, low_quality, etc.)")
+    validation_details: Dict[str, Any] = Field(default_factory=dict, description="Detailed validation info")
+    age_at_photo: Optional[int] = Field(None, description="Estimated age in the photo")
+    photo_year: Optional[int] = Field(None, description="Year the photo was taken")
+    quality_score: Optional[float] = Field(None, ge=0.0, le=1.0, description="Photo quality score if available")
+    upload_timestamp: Optional[str] = Field(None, description="Timestamp when the image was stored")
 
 
 class PersonRecord(BaseModel):
@@ -228,7 +256,8 @@ class PersonRecord(BaseModel):
     id: str = Field(..., description="Record ID")
     contact: str = Field(..., description="Contact information")
     metadata: Dict[str, Any] = Field(..., description="Full metadata of the record")
-    image_url: Optional[str] = Field(None, description="Cloudinary URL of the person's image")
+    image_url: Optional[str] = Field(None, description="Primary Cloudinary URL for quick display")
+    images: List[PersonImage] = Field(default_factory=list, description="All images belonging to this person")
 
 
 class MatchResult(BaseModel):
