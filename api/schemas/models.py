@@ -120,6 +120,101 @@ class ConfidenceExplanation(BaseModel):
     summary: str = Field(..., description="Overall summary of the match")
     recommendations: List[str] = Field(..., description="Recommended next steps")
     threshold_info: Dict[str, float] = Field(..., description="Confidence level thresholds")
+    multi_image_details: Optional['MultiImageMatchDetails'] = Field(
+        None, 
+        description="Multi-image matching details (only present for multi-image matches)"
+    )
+
+
+# ============================================================================
+# Multi-Image Upload Schemas
+# ============================================================================
+
+class UploadedImageInfo(BaseModel):
+    """Information about a valid uploaded image (used for matching)."""
+    image_id: str = Field(..., description="Unique image identifier", example="MISS_001_img_0")
+    image_index: int = Field(..., ge=0, description="Index of image in upload batch (0-based)", example=0)
+    image_url: Optional[str] = Field(None, description="Cloudinary URL for the image")
+    age_at_photo: int = Field(..., ge=0, le=120, description="Age when photo was taken", example=8)
+    photo_year: Optional[int] = Field(None, description="Year photo was taken", example=2010)
+    quality_score: float = Field(..., ge=0.0, le=1.0, description="Photo quality score", example=0.85)
+    validation_status: str = Field(default="valid", description="Always 'valid' for this type")
+
+
+class ReferenceImageInfo(BaseModel):
+    """Information about a reference-only image (not used for matching)."""
+    image_id: str = Field(..., description="Unique image identifier", example="MISS_001_img_1")
+    image_index: int = Field(..., ge=0, description="Index in upload batch", example=1)
+    image_url: Optional[str] = Field(None, description="Cloudinary URL for the image")
+    age_at_photo: int = Field(..., ge=0, le=120, description="Estimated age when photo taken", example=10)
+    photo_year: Optional[int] = Field(None, description="Year photo was taken if known", example=2005)
+    validation_status: str = Field(
+        ..., 
+        description="Reason: 'no_face_detected', 'low_quality', 'face_too_small', 'multiple_faces'",
+        example="no_face_detected"
+    )
+    reason: str = Field(
+        ..., 
+        description="Human-readable explanation",
+        example="MTCNN could not detect face. Image saved for reference purposes."
+    )
+
+
+class FailedImageInfo(BaseModel):
+    """Information about a failed image upload."""
+    filename: str = Field(..., description="Original filename of the failed image")
+    index: int = Field(..., ge=0, description="Index in the upload batch")
+    reason: str = Field(..., description="Reason for failure", example="No face detected")
+
+
+class MultiImageUploadResponse(BaseModel):
+    """Response for batch/multi-image upload."""
+    success: bool = Field(..., description="Overall upload success status")
+    message: str = Field(..., description="Human-readable message")
+    case_id: Optional[str] = Field(None, description="Case ID or Found ID for the person", example="MISS_001")
+    total_images_uploaded: int = Field(..., ge=0, description="Total images saved (valid + reference)")
+    total_images_failed: int = Field(default=0, ge=0, description="Number of failed images (file errors)")
+    
+    # Separate valid and reference images
+    valid_images: List[UploadedImageInfo] = Field(
+        default=[], 
+        description="Images used for matching (with face embeddings)"
+    )
+    reference_images: List[ReferenceImageInfo] = Field(
+        default=[], 
+        description="Images saved for reference only (no face detected or low quality)"
+    )
+    failed_images: List[FailedImageInfo] = Field(
+        default=[], 
+        description="Images that failed to upload (file errors)"
+    )
+    
+    # Counts for quick access
+    matching_images_count: int = Field(..., description="Number of images used for matching")
+    reference_images_count: int = Field(default=0, description="Number of reference-only images")
+    
+    potential_matches: List['MatchResult'] = Field(default=[], description="Potential matches found")
+    processing_time_ms: float = Field(..., description="Total processing time in milliseconds")
+
+
+class MultiImageMatchDetails(BaseModel):
+    """Detailed information about multi-image matching."""
+    total_query_images: int = Field(..., ge=1, description="Number of query images used")
+    total_candidate_images: int = Field(..., ge=1, description="Number of candidate images")
+    num_comparisons: int = Field(..., ge=1, description="Total pairwise comparisons performed")
+    best_similarity: float = Field(..., ge=0.0, le=1.0, description="Best pairwise similarity score")
+    mean_similarity: float = Field(..., ge=0.0, le=1.0, description="Mean of top similarities")
+    consistency_score: float = Field(..., ge=0.0, le=1.0, description="Consistency across image pairs")
+    best_match_pair: Dict[str, int] = Field(
+        ..., 
+        description="Indices of best matching image pair",
+        example={"query_idx": 2, "candidate_idx": 1}
+    )
+    query_age_at_best_match: int = Field(..., description="Query person's age in best matching photo")
+    candidate_age_at_best_match: int = Field(..., description="Candidate person's age in best matching photo")
+    age_gap_at_best_match: int = Field(..., ge=0, description="Age gap between best matching photos")
+    age_bracket_match_found: bool = Field(..., description="Whether similar-age photos were found")
+    num_good_matches: int = Field(..., ge=0, description="Number of pairs above good match threshold")
 
 
 class PersonRecord(BaseModel):
@@ -248,3 +343,8 @@ class ValidationResult(BaseModel):
     is_valid: bool = Field(..., description="Whether input is valid")
     errors: List[str] = Field(default_factory=list, description="List of validation errors")
     warnings: List[str] = Field(default_factory=list, description="List of validation warnings")
+
+
+# Update forward references
+MultiImageUploadResponse.model_rebuild()
+ConfidenceExplanation.model_rebuild()

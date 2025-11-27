@@ -763,6 +763,306 @@ class BilateralSearchService:
         
         return details
     
+    # ========================================================================
+    # MULTI-IMAGE SEARCH METHODS
+    # ========================================================================
+    
+    def _get_primary_embedding(self, query_embeddings: List[Dict[str, Any]]) -> np.ndarray:
+        """
+        Get best quality embedding for initial search.
+        
+        Args:
+            query_embeddings: List of dicts with 'embedding', 'age_at_photo', 'quality'
+            
+        Returns:
+            Best quality embedding as numpy array
+        """
+        if len(query_embeddings) == 1:
+            return query_embeddings[0]['embedding']
+        
+        # Sort by quality, return highest
+        best = max(query_embeddings, key=lambda x: x.get('quality', 0.5))
+        return best['embedding']
+    
+    def search_for_found_multi_image(
+        self,
+        query_embeddings: List[Dict[str, Any]],
+        query_metadata: Dict[str, Any],
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for found persons using multiple query images.
+        
+        This method implements multi-image search with aggregation:
+        1. Stage 1: Qdrant search with primary (best quality) embedding
+        2. Stage 2: Group results by found_id
+        3. Stage 3: Aggregate scores per person using multi_image_aggregation
+        4. Stage 4: Sort, validate, and return top-k persons
+        
+        Args:
+            query_embeddings: List of dicts with:
+                - 'embedding': np.ndarray (512-D)
+                - 'age_at_photo': int
+                - 'quality': float (0-1)
+            query_metadata: Shared metadata for query person
+            limit: Number of persons to return
+            
+        Returns:
+            List of matches with aggregated scores
+            
+        Example:
+            >>> query_embeddings = [
+            ...     {"embedding": emb1, "age_at_photo": 8, "quality": 0.9},
+            ...     {"embedding": emb2, "age_at_photo": 15, "quality": 0.85}
+            ... ]
+            >>> matches = search.search_for_found_multi_image(query_embeddings, metadata, limit=10)
+        """
+        from services.multi_image_aggregation import get_aggregation_service
+        from collections import defaultdict
+        
+        try:
+            logger.info(f"Multi-image search: {len(query_embeddings)} query images")
+            
+            # Stage 1: Qdrant search with primary embedding
+            primary_embedding = self._get_primary_embedding(query_embeddings)
+            
+            # Inflate limit to account for multiple images per person
+            # Assumption: avg 5 images per person
+            inflated_limit = limit * 10
+            
+            logger.info(f"Stage 1: Searching with inflated limit={inflated_limit}")
+            vector_matches = self.vector_db.search_similar_faces(
+                query_embedding=primary_embedding,
+                collection_name="found_persons",
+                limit=inflated_limit,
+                score_threshold=self.initial_search_threshold,
+                filters={"is_valid_for_matching": True},  # ← FILTER: Only valid images
+                with_vectors=True  # ← CRITICAL: retrieve embeddings for aggregation
+            )
+            
+            logger.info(f"Stage 1: Retrieved {len(vector_matches)} points from Qdrant")
+            
+            # Stage 2: Group by found_id
+            persons = defaultdict(list)
+            for match in vector_matches:
+                found_id = match['payload'].get('found_id') or match['payload'].get('case_id')
+                if found_id:
+                    persons[found_id].append(match)
+            
+            logger.info(f"Stage 2: Grouped into {len(persons)} unique persons")
+            
+            # Stage 3: Aggregate scores per person
+            aggregation_service = get_aggregation_service()
+            aggregated_results = []
+            
+            for found_id, person_points in persons.items():
+                # Build candidate images list
+                candidate_images = []
+                for point in person_points:
+                    if 'vector' not in point:
+                        logger.warning(f"Point {point['id']} missing vector, skipping")
+                        continue
+                    
+                    candidate_images.append({
+                        'image_id': point['payload'].get('image_id', point['id']),
+                        'embedding': np.array(point['vector']),
+                        'age_at_photo': point['payload'].get('age_at_photo', 0),
+                        'case_id': found_id
+                    })
+                
+                if not candidate_images:
+                    continue
+                
+                # Aggregate similarity using multi_image_aggregation service
+                try:
+                    agg_result = aggregation_service.aggregate_multi_image_similarity(
+                        query_images=[{
+                            'image_id': f"query_{i}",
+                            'embedding': q['embedding'],
+                            'age_at_photo': q['age_at_photo'],
+                            'case_id': 'query'
+                        } for i, q in enumerate(query_embeddings)],
+                        target_images=candidate_images
+                    )
+                    
+                    # Calculate metadata similarity
+                    metadata_sim = self._calculate_metadata_similarity(
+                        query_metadata,
+                        person_points[0]['payload'],
+                        'found'
+                    )
+                    
+                    # Combined score (face + metadata)
+                    face_sim = agg_result.best_similarity
+                    combined_score = (self.face_weight * face_sim + 
+                                     self.metadata_weight * metadata_sim)
+                    
+                    aggregated_results.append({
+                        'id': found_id,
+                        'face_similarity': face_sim,
+                        'metadata_similarity': metadata_sim,
+                        'combined_score': combined_score,
+                        'payload': person_points[0]['payload'],
+                        'multi_image_details': {
+                            'total_query_images': len(query_embeddings),
+                            'total_candidate_images': len(candidate_images),
+                            'num_comparisons': len(agg_result.all_pair_scores),
+                            'best_similarity': agg_result.best_similarity,
+                            'mean_similarity': agg_result.mean_similarity,
+                            'consistency_score': agg_result.consistency_score,
+                            'num_good_matches': agg_result.num_good_matches,
+                            'best_age_gap': agg_result.best_age_gap
+                        },
+                        'num_candidate_images': len(candidate_images)
+                    })
+                    
+                except Exception as e:
+                    logger.error(f"Aggregation failed for {found_id}: {e}")
+                    continue
+            
+            # Stage 4: Sort and validate
+            aggregated_results.sort(key=lambda x: x['combined_score'], reverse=True)
+            validated = [r for r in aggregated_results if self._validate_match(r)]
+            final_results = validated[:limit]
+            
+            logger.info(f"Stage 4: Returning {len(final_results)} persons (from {len(aggregated_results)} aggregated)")
+            return final_results
+            
+        except Exception as e:
+            logger.error(f"Multi-image search for found persons failed: {str(e)}", exc_info=True)
+            raise RuntimeError(f"Multi-image search failed: {str(e)}")
+    
+    def search_for_missing_multi_image(
+        self,
+        query_embeddings: List[Dict[str, Any]],
+        query_metadata: Dict[str, Any],
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for missing persons using multiple query images.
+        
+        Symmetric to search_for_found_multi_image() but searches missing_persons collection.
+        
+        Args:
+            query_embeddings: List of dicts with 'embedding', 'age_at_photo', 'quality'
+            query_metadata: Shared metadata for query person
+            limit: Number of persons to return
+            
+        Returns:
+            List of matches with aggregated scores
+        """
+        from services.multi_image_aggregation import get_aggregation_service
+        from collections import defaultdict
+        
+        try:
+            logger.info(f"Multi-image search (missing): {len(query_embeddings)} query images")
+            
+            # Stage 1: Qdrant search with primary embedding
+            primary_embedding = self._get_primary_embedding(query_embeddings)
+            inflated_limit = limit * 10
+            
+            logger.info(f"Stage 1: Searching with inflated limit={inflated_limit}")
+            vector_matches = self.vector_db.search_similar_faces(
+                query_embedding=primary_embedding,
+                collection_name="missing_persons",
+                limit=inflated_limit,
+                score_threshold=self.initial_search_threshold,
+                filters={"is_valid_for_matching": True},  # ← FILTER: Only valid images
+                with_vectors=True
+            )
+            
+            logger.info(f"Stage 1: Retrieved {len(vector_matches)} points from Qdrant")
+            
+            # Stage 2: Group by case_id
+            persons = defaultdict(list)
+            for match in vector_matches:
+                case_id = match['payload'].get('case_id')
+                if case_id:
+                    persons[case_id].append(match)
+            
+            logger.info(f"Stage 2: Grouped into {len(persons)} unique persons")
+            
+            # Stage 3: Aggregate scores per person
+            aggregation_service = get_aggregation_service()
+            aggregated_results = []
+            
+            for case_id, person_points in persons.items():
+                # Build candidate images list
+                candidate_images = []
+                for point in person_points:
+                    if 'vector' not in point:
+                        logger.warning(f"Point {point['id']} missing vector, skipping")
+                        continue
+                    
+                    candidate_images.append({
+                        'image_id': point['payload'].get('image_id', point['id']),
+                        'embedding': np.array(point['vector']),
+                        'age_at_photo': point['payload'].get('age_at_photo', 0),
+                        'case_id': case_id
+                    })
+                
+                if not candidate_images:
+                    continue
+                
+                # Aggregate similarity
+                try:
+                    agg_result = aggregation_service.aggregate_multi_image_similarity(
+                        query_images=[{
+                            'image_id': f"query_{i}",
+                            'embedding': q['embedding'],
+                            'age_at_photo': q['age_at_photo'],
+                            'case_id': 'query'
+                        } for i, q in enumerate(query_embeddings)],
+                        target_images=candidate_images
+                    )
+                    
+                    # Calculate metadata similarity
+                    metadata_sim = self._calculate_metadata_similarity(
+                        query_metadata,
+                        person_points[0]['payload'],
+                        'missing'
+                    )
+                    
+                    # Combined score
+                    face_sim = agg_result.best_similarity
+                    combined_score = (self.face_weight * face_sim + 
+                                     self.metadata_weight * metadata_sim)
+                    
+                    aggregated_results.append({
+                        'id': case_id,
+                        'face_similarity': face_sim,
+                        'metadata_similarity': metadata_sim,
+                        'combined_score': combined_score,
+                        'payload': person_points[0]['payload'],
+                        'multi_image_details': {
+                            'total_query_images': len(query_embeddings),
+                            'total_candidate_images': len(candidate_images),
+                            'num_comparisons': len(agg_result.all_pair_scores),
+                            'best_similarity': agg_result.best_similarity,
+                            'mean_similarity': agg_result.mean_similarity,
+                            'consistency_score': agg_result.consistency_score,
+                            'num_good_matches': agg_result.num_good_matches,
+                            'best_age_gap': agg_result.best_age_gap
+                        },
+                        'num_candidate_images': len(candidate_images)
+                    })
+                    
+                except Exception as e:
+                    logger.error(f"Aggregation failed for {case_id}: {e}")
+                    continue
+            
+            # Stage 4: Sort and validate
+            aggregated_results.sort(key=lambda x: x['combined_score'], reverse=True)
+            validated = [r for r in aggregated_results if self._validate_match(r)]
+            final_results = validated[:limit]
+            
+            logger.info(f"Stage 4: Returning {len(final_results)} persons (from {len(aggregated_results)} aggregated)")
+            return final_results
+            
+        except Exception as e:
+            logger.error(f"Multi-image search for missing persons failed: {str(e)}", exc_info=True)
+            raise RuntimeError(f"Multi-image search failed: {str(e)}")
+    
     def get_search_statistics(self) -> Dict[str, Any]:
         """Get statistics about the search service and database."""
         try:
