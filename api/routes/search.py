@@ -292,7 +292,11 @@ async def search_missing_person(
                 )
                 
                 # Format the potential matches
-                matches = format_match_results(found_matches, confidence_scoring)
+                matches = format_match_results(
+                    found_matches,
+                    confidence_scoring,
+                    min_confidence_threshold=0.0,
+                )
                 logger.info(f"[STEP 6] Found {len(matches)} potential matches in found_persons")
                 
             else:
@@ -440,7 +444,11 @@ async def search_found_person(
                 )
                 
                 # Format the potential matches
-                matches = format_match_results(missing_matches, confidence_scoring)
+                matches = format_match_results(
+                    missing_matches,
+                    confidence_scoring,
+                    min_confidence_threshold=0.0,
+                )
                 logger.info(f"Found {len(matches)} potential matches in missing_persons")
                 
             else:

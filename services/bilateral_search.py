@@ -114,7 +114,7 @@ class BilateralSearchService:
                 query_embedding=found_embedding,
                 collection_name="missing_persons",
                 limit=limit * 5,  # Get more results for reranking
-                score_threshold=self.initial_search_threshold,  # Configurable initial search threshold
+                score_threshold=None,
                 filters=None  # Don't apply filters in vector search, apply in reranking
             )
             
@@ -130,9 +130,7 @@ class BilateralSearchService:
                 key=lambda m: m.get('combined_score', m.get('face_similarity', 0.0)),
                 reverse=True
             )
-            validated_matches = [m for m in ordered_matches if self._validate_match(m)]
-            final_pool = validated_matches if validated_matches else ordered_matches
-            top_k_matches = final_pool[:limit]
+            top_k_matches = ordered_matches[:limit]
             
             logger.info(
                 f"Returning {len(top_k_matches)} top missing-person candidates "
@@ -186,7 +184,7 @@ class BilateralSearchService:
                 query_embedding=missing_embedding,
                 collection_name="found_persons",
                 limit=limit * 5,  # Get more results for reranking
-                score_threshold=self.initial_search_threshold,  # Configurable initial search threshold
+                score_threshold=None,
                 filters=None  # Don't apply filters in vector search, apply in reranking
             )
             
@@ -202,9 +200,7 @@ class BilateralSearchService:
                 key=lambda m: m.get('combined_score', m.get('face_similarity', 0.0)),
                 reverse=True
             )
-            validated_matches = [m for m in ordered_matches if self._validate_match(m)]
-            final_pool = validated_matches if validated_matches else ordered_matches
-            top_k_matches = final_pool[:limit]
+            top_k_matches = ordered_matches[:limit]
             
             logger.info(
                 f"Returning {len(top_k_matches)} top found-person candidates "
@@ -866,7 +862,7 @@ class BilateralSearchService:
                 query_embedding=primary_embedding,
                 collection_name="found_persons",
                 limit=inflated_limit,
-                score_threshold=self.initial_search_threshold,
+                score_threshold=None,
                 filters={"is_valid_for_matching": True},  # ← FILTER: Only valid images
                 with_vectors=True  # ← CRITICAL: retrieve embeddings for aggregation
             )
@@ -963,9 +959,7 @@ class BilateralSearchService:
                 result['threshold_used'] = threshold
                 result['multi_image_details']['threshold_used'] = threshold
             
-            validated = [r for r in aggregated_results if self._validate_match(r)]
-            final_pool = validated if validated else aggregated_results
-            final_results = final_pool[:limit]
+            final_results = aggregated_results[:limit]
             
             logger.info(
                 f"Stage 4: Returning {len(final_results)} persons (limit={limit}, total_aggregated={len(aggregated_results)})"
@@ -1012,7 +1006,7 @@ class BilateralSearchService:
                 query_embedding=primary_embedding,
                 collection_name="missing_persons",
                 limit=inflated_limit,
-                score_threshold=self.initial_search_threshold,
+                score_threshold=None,
                 filters={"is_valid_for_matching": True},  # ← FILTER: Only valid images
                 with_vectors=True
             )
@@ -1109,9 +1103,7 @@ class BilateralSearchService:
                 result['threshold_used'] = threshold
                 result['multi_image_details']['threshold_used'] = threshold
             
-            validated = [r for r in aggregated_results if self._validate_match(r)]
-            final_pool = validated if validated else aggregated_results
-            final_results = final_pool[:limit]
+            final_results = aggregated_results[:limit]
             
             logger.info(
                 f"Stage 4: Returning {len(final_results)} persons (limit={limit}, total_aggregated={len(aggregated_results)})"
