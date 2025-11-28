@@ -286,7 +286,7 @@ class VectorDatabaseService:
         query_embedding: np.ndarray,
         collection_name: str,
         limit: int = 10,
-        score_threshold: float = 0.65,
+        score_threshold: Optional[float] = None,
         filters: Optional[Dict[str, Any]] = None,
         with_vectors: bool = False
     ) -> List[Dict[str, Any]]:
@@ -367,15 +367,23 @@ class VectorDatabaseService:
             # Perform search
             from qdrant_client.models import SearchRequest
             start_time = time.time()
-            logger.info(f"[QdrantSearch] collection={collection_name} limit={limit} threshold={score_threshold} with_vectors={with_vectors}")
-            search_results = self.client.query_points(
-                collection_name=collection_name,
-                query=query_embedding.tolist(),
-                query_filter=search_filter,
-                limit=limit,
-                score_threshold=score_threshold,
-                with_vectors=with_vectors  # Pass through with_vectors parameter
-            ).points
+            logger.info(
+                f"[QdrantSearch] collection={collection_name} limit={limit} "
+                f"threshold={'None' if score_threshold is None else score_threshold} "
+                f"with_vectors={with_vectors}"
+            )
+
+            query_kwargs: Dict[str, Any] = {
+                "collection_name": collection_name,
+                "query": query_embedding.tolist(),
+                "query_filter": search_filter,
+                "limit": limit,
+                "with_vectors": with_vectors,
+            }
+            if score_threshold is not None:
+                query_kwargs["score_threshold"] = score_threshold
+
+            search_results = self.client.query_points(**query_kwargs).points
             elapsed_ms = (time.time() - start_time) * 1000
             logger.info(f"[QdrantSearch] completed in {elapsed_ms:.2f}ms | results={len(search_results)}")
             
@@ -955,7 +963,7 @@ if __name__ == "__main__":
             dummy_embedding,
             "missing_persons",
             limit=5,
-            score_threshold=0.5
+            score_threshold=None
         )
         print(f"Found {len(search_results)} similar faces")
         

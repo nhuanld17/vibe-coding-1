@@ -53,8 +53,10 @@ async def lifespan(app: FastAPI):
         logger.info(f"Model path: {settings.arcface_model_path}")
         logger.info(f"GPU enabled: {settings.use_gpu}")
         logger.info(f"Face confidence threshold: {settings.face_confidence_threshold}")
-        logger.info(f"Face search threshold: {settings.face_search_threshold}")
-        logger.info(f"Similarity threshold: {settings.similarity_threshold}")
+        logger.info(
+            "Pure Top-K search enabled (no fixed similarity threshold). "
+            f"Default TOP_K_RESULTS={settings.top_k_matches}"
+        )
         
         logger.info("API startup completed successfully")
         

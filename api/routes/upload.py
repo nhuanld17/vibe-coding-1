@@ -88,7 +88,7 @@ def process_image_and_extract_face(
 def format_match_results(
     matches: List[dict],
     confidence_scoring,
-    min_confidence_threshold: float = 0.50  # Allow LOW matches (0.50-0.60) for extra context
+    min_confidence_threshold: float = 0.0
 ) -> List[MatchResult]:
     """
     Format match results with confidence scoring.
@@ -109,16 +109,14 @@ def format_match_results(
             # Calculate confidence
             confidence_level, confidence_score, explanation = confidence_scoring.calculate_confidence(match)
             
-            # STRICT FILTER: Reject matches with confidence score below threshold
-            # This prevents showing very low confidence matches (like 27.4%) to users
+            # PURE TOP-K: vẫn giữ kết quả nhưng log nếu dưới ngưỡng cấu hình
             if confidence_score < min_confidence_threshold:
                 rejected_count += 1
                 logger.debug(
-                    f"Rejecting match {match.get('id', 'unknown')} with low confidence: "
+                    f"Low-confidence match retained (pure Top-K): id={match.get('id', 'unknown')} "
                     f"confidence_score={confidence_score:.3f} < threshold={min_confidence_threshold:.3f} "
                     f"(level={confidence_level.value})"
                 )
-                continue
             
             # Format confidence factors
             factors = {}
@@ -169,7 +167,10 @@ def format_match_results(
             continue
     
     if rejected_count > 0:
-        logger.info(f"Filtered out {rejected_count} matches with confidence < {min_confidence_threshold:.2f}")
+        logger.info(
+            f"{rejected_count} matches flagged with confidence < {min_confidence_threshold:.2f} "
+            f"(all retained for Top-K output)"
+        )
     
     return formatted_matches
 
@@ -331,7 +332,11 @@ async def upload_missing_person(
             matches = bilateral_search.search_for_found(
                 embedding, metadata_dict, limit=settings.top_k_matches
             )
-            potential_matches = format_match_results(matches, confidence_scoring)
+            potential_matches = format_match_results(
+                matches,
+                confidence_scoring,
+                min_confidence_threshold=0.0,
+            )
             logger.info(f"Found {len(potential_matches)} potential matches for missing person {missing_metadata.name}")
         except Exception as e:
             logger.error(f"Search for matches failed: {str(e)}")
@@ -528,7 +533,11 @@ async def upload_found_person(
                 embedding, metadata_dict, limit=settings.top_k_matches
             )
             logger.info(f"Bilateral search returned {len(matches)} raw matches")
-            potential_matches = format_match_results(matches, confidence_scoring)
+            potential_matches = format_match_results(
+                matches,
+                confidence_scoring,
+                min_confidence_threshold=0.0,
+            )
             logger.info(f"Formatted {len(potential_matches)} potential matches for found person {found_metadata.found_id}")
             if len(potential_matches) > 0:
                 logger.info(f"Top match: face_similarity={potential_matches[0].face_similarity:.3f}, combined_score={potential_matches[0].combined_score:.3f}")
@@ -982,7 +991,11 @@ async def upload_missing_person_batch(
                     limit=settings.top_k_matches
                 )
                 
-                potential_matches = format_match_results(matches, confidence_scoring)
+                potential_matches = format_match_results(
+                    matches,
+                    confidence_scoring,
+                    min_confidence_threshold=0.0,
+                )
                 logger.info(f"Found {len(potential_matches)} potential matches (multi-image)")
                 
             except Exception as e:
@@ -1298,7 +1311,11 @@ async def upload_found_person_batch(
                     limit=settings.top_k_matches
                 )
                 
-                potential_matches = format_match_results(matches, confidence_scoring)
+                potential_matches = format_match_results(
+                    matches,
+                    confidence_scoring,
+                    min_confidence_threshold=0.0,
+                )
                 logger.info(f"Found {len(potential_matches)} potential matches (multi-image)")
                 
             except Exception as e:
